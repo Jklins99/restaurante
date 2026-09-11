@@ -370,7 +370,7 @@ if sheets_service:
                     "Concepto": ["IGV Ventas", "IGV Compras"],
                     "Monto (S/)": [igv_v, igv_c]
                 }).set_index("Concepto")
-                st.bar_chart(resumen_grafico, color=["#2E7D32", "#D32F2F"])
+                st.bar_chart(resumen_grafico)
             
             with col_grafico2:
                 # Resumen de cantidad de documentos
@@ -378,7 +378,7 @@ if sheets_service:
                     "Tipo": ["Ventas", "Compras"],
                     "Cantidad": [len(ventas_mes), len(compras_mes)]
                 }).set_index("Tipo")
-                st.bar_chart(resumen_docs, color=["#2E7D32", "#FF6F00"])
+                st.bar_chart(resumen_docs)
             
             st.divider()
             
