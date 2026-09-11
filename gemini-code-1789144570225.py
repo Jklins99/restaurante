@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 
 # === TUS CONFIGURACIONES ===
 SPREADSHEET_ID = '1811VY4-Xa4ZOf7j6MVd5zYFCdhpyxdtuwq1pD5mHlh4'
-RUC_RESTAURANTE = '10402504051'
+RUC_RESTAURANTE = '10402504051' # Tu RUC para detectar ventas automáticas
 # =========================
 
 st.set_page_config(page_title="Gestor de Facturación - Restaurante", page_icon="🍽️", layout="wide")
@@ -55,7 +55,6 @@ def descargar_historial_sheets(sheets_service):
                 
             df = pd.DataFrame(datos_normalizados, columns=cabeceras)
             
-            # Limpieza profunda de formato monetario (removiendo comas y espacios)
             for col in ['Base Imponible', 'IGV (18%)', 'Total']:
                 df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -222,7 +221,7 @@ with tab2:
                 igv_v = ventas_mes['IGV (18%)'].sum() if not ventas_mes.empty else 0.0
                 igv_c = compras_mes['IGV (18%)'].sum() if not compras_mes.empty else 0.0
                 total_v = ventas_mes['Total'].sum() if not ventas_mes.empty else 0.0
-                total_c = compras_mes['Total'].sum() if not ventas_mes.empty else 0.0
+                total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
                 
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric(f"Ventas Totales ({mes_seleccionado})", f"S/ {total_v:,.2f}")
@@ -239,8 +238,18 @@ with tab2:
                 
                 st.bar_chart(resumen_grafico)
                 
-                st.write("### 📋 Detalle de Comprobantes Registrados en este Mes")
-                st.dataframe(df_mes, use_container_width=True)
+                st.divider()
+                st.write("### 📤 Registro de Ventas del Mes")
+                if not ventas_mes.empty:
+                    st.dataframe(ventas_mes.drop(columns=['Categoría']), use_container_width=True)
+                else:
+                    st.info("No hay ventas registradas en este periodo.")
+
+                st.write("### 📥 Registro de Compras del Mes")
+                if not compras_mes.empty:
+                    st.dataframe(compras_mes.drop(columns=['Categoría']), use_container_width=True)
+                else:
+                    st.info("No hay compras registradas en este periodo.")
             else:
                 st.info("No se encontraron fechas válidas en el historial registrado.")
         else:
