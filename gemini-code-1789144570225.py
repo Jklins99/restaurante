@@ -3,7 +3,6 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import pdfplumber
 import re
-import io
 import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -38,6 +37,22 @@ def obtener_facturas_registradas(sheets_service):
         pass
     return registradas
 
+def descargar_historial_sheets(sheets_service):
+    """Descarga todo el contenido del Google Sheets para armar el Dashboard"""
+    try:
+        resultado = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range='A:I'
+        ).execute()
+        filas = resultado.get('values', [])
+        if len(filas) > 1:
+            cabeceras = filas[0]
+            datos = filas[1:]
+            df = pd.DataFrame(datos, columns=cabeceras[:len(datos[0])])
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
+
 def guardar_en_sheets(sheets_service, datos, categoria):
     fila = [
         str(datos['Fecha']), str(datos['Tipo']), str(datos['Comprobante']), str(datos['RUC']), 
@@ -69,7 +84,6 @@ def parse_sunat_xml(file_obj):
         igv = float(igv_node.text) if igv_node is not None else 0.0
         ruc_val = ruc.text if ruc is not None else 'N/A'
         
-        # Clasificación automática por RUC
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
@@ -100,7 +114,6 @@ def procesar_factura_pdf(file_obj):
         igv = total - base_imponible if total > 0 else 0.0
         ruc_val = ruc_match.group(0) if ruc_match else 'N/A'
         
-        # Clasificación automática por RUC
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
@@ -114,61 +127,117 @@ def procesar_factura_pdf(file_obj):
         return {"Archivo": file_obj.name, "Tipo": "PDF", "Categoría": "Compra", "Estado": "Error de lectura"}
 
 # --- INTERFAZ ---
-st.title("🍽️ Gestor de Facturación - Sistema Automático Anti-Duplicados")
-st.write("Sube todos tus comprobantes (XML o PDF) juntos en la siguiente bandeja. El sistema detectará automáticamente si es Venta o Compra.")
+st.title("🍽️ Gestor de Facturación - Restaurante")
 
 try:
     sheets_service = obtener_servicio_sheets()
     facturas_ya_registradas = obtener_facturas_registradas(sheets_service)
 except Exception:
+    sheets_service = None
     facturas_ya_registradas = set()
 
-# ÚNICO BOTÓN DE CARGA GENERAL
-archivos_subidos = st.file_uploader("📂 Arrastra o selecciona tus archivos (XML / PDF)", type=['xml', 'pdf'], accept_multiple_files=True)
+# --- PESTAÑAS DE NAVEGACIÓN ---
+tab1, tab2 = st.tabs(["📤 Subir y Procesar Lote", "📊 Dashboard y Registros Históricos"])
 
-datos_procesados = []
+with tab1:
+    st.write("Sube todos tus comprobantes (XML o PDF) juntos. El sistema detectará automáticamente si es Venta o Compra.")
+    
+    archivos_subidos = st.file_uploader("📂 Arrastra o selecciona tus archivos (XML / PDF)", type=['xml', 'pdf'], accept_multiple_files=True)
 
-if archivos_subidos:
-    for f in archivos_subidos:
-        datos = parse_sunat_xml(f) if f.name.lower().endswith('.xml') else procesar_factura_pdf(f)
-        llave_actual = f"{datos.get('RUC')}-{datos.get('Comprobante')}"
-        
-        if llave_actual in facturas_ya_registradas and datos.get('RUC') != 'N/A':
-            datos['Estado'] = '⚠️ Duplicado'
+    datos_procesados = []
+
+    if archivos_subidos:
+        for f in archivos_subidos:
+            datos = parse_sunat_xml(f) if f.name.lower().endswith('.xml') else procesar_factura_pdf(f)
+            llave_actual = f"{datos.get('RUC')}-{datos.get('Comprobante')}"
             
-        datos_procesados.append(datos)
+            if llave_actual in facturas_ya_registradas and datos.get('RUC') != 'N/A':
+                datos['Estado'] = '⚠️ Duplicado'
+                
+            datos_procesados.append(datos)
 
-df_todos = pd.DataFrame(datos_procesados)
+    df_todos = pd.DataFrame(datos_procesados)
 
-if not df_todos.empty:
-    st.divider()
-    df_validos = df_todos[df_todos['Estado'] == 'OK']
-    
-    total_igv_ventas = df_validos[df_validos['Categoría'] == 'Venta']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
-    total_igv_compras = df_validos[df_validos['Categoría'] == 'Compra']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
-    
-    m1, m2, m3 = st.columns(3)
-    m1.metric("IGV Ventas Detectadas", f"S/ {total_igv_ventas:,.2f}")
-    m2.metric("Crédito Fiscal Compras", f"S/ {total_igv_compras:,.2f}")
-    m3.metric("IGV NETO Estimado", f"S/ {max(0, total_igv_ventas - total_igv_compras):,.2f}")
-    
-    st.write("### Vista Previa y Clasificación Automática")
-    st.dataframe(df_todos, use_container_width=True)
-    
-    duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
-    if not duplicados.empty:
-        st.warning(f"¡Atención! Se detectaron {len(duplicados)} comprobantes duplicados que ya están registrados en el Excel.")
+    if not df_todos.empty:
+        st.divider()
+        df_validos = df_todos[df_todos['Estado'] == 'OK']
+        
+        total_igv_ventas = df_validos[df_validos['Categoría'] == 'Venta']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
+        total_igv_compras = df_validos[df_validos['Categoría'] == 'Compra']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("IGV Ventas Detectadas", f"S/ {total_igv_ventas:,.2f}")
+        m2.metric("Crédito Fiscal Compras", f"S/ {total_igv_compras:,.2f}")
+        m3.metric("IGV NETO Estimado", f"S/ {max(0, total_igv_ventas - total_igv_compras):,.2f}")
+        
+        st.write("### Vista Previa y Clasificación Automática")
+        st.dataframe(df_todos, use_container_width=True)
+        
+        duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
+        if not duplicados.empty:
+            st.warning(f"¡Atención! Se detectaron {len(duplicados)} comprobantes duplicados que ya están registrados en el Excel.")
 
-    st.divider()
-    if not df_validos.empty:
-        if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
-            with st.spinner("Guardando en la base de datos..."):
-                try:
-                    exitos = 0
-                    for index, fila in df_validos.iterrows():
-                        guardar_en_sheets(sheets_service, fila, fila['Categoría'])
-                        exitos += 1
-                    
-                    st.success(f"¡Proceso exitoso! Se registraron {exitos} comprobantes en tu libro mayor de Google Sheets.")
-                except Exception as e:
-                    st.error(f"Ocurrió un error al registrar en Sheets: {e}")
+        st.divider()
+        if not df_validos.empty:
+            if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
+                with st.spinner("Guardando en la base de datos..."):
+                    try:
+                        exitos = 0
+                        for index, fila in df_validos.iterrows():
+                            guardar_en_sheets(sheets_service, fila, fila['Categoría'])
+                            exitos += 1
+                        
+                        st.success(f"¡Proceso exitoso! Se registraron {exitos} comprobantes en tu libro mayor de Google Sheets.")
+                    except Exception as e:
+                        st.error(f"Ocurrió un error al registrar en Sheets: {e}")
+
+with tab2:
+    st.subheader("📊 Panel de Control e Historial Mensual")
+    if sheets_service:
+        df_historial = descargar_historial_sheets(sheets_service)
+        if not df_historial.empty:
+            # Limpieza y preparación de datos
+            df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'], errors='coerce')
+            df_historial['Mes'] = df_historial['Fecha'].dt.to_period('M').astype(str)
+            df_historial['Base Imponible'] = pd.to_numeric(df_historial['Base Imponible'], errors='fillna').fillna(0)
+            df_historial['IGV (18%)'] = pd.to_numeric(df_historial['IGV (18%)'], errors='fillna').fillna(0)
+            df_historial['Total'] = pd.to_numeric(df_historial['Total'], errors='fillna').fillna(0)
+            
+            # Filtro por Mes
+            meses_disponibles = sorted(df_historial['Mes'].dropna().unique(), reverse=True)
+            if meses_disponibles:
+                mes_seleccionado = st.selectbox("📅 Selecciona el Periodo (Mes)", meses_disponibles)
+                
+                df_mes = df_historial[df_historial['Mes'] == mes_seleccionado]
+                
+                ventas_mes = df_mes[df_mes['Categoría'] == 'Venta']
+                compras_mes = df_mes[df_mes['Categoría'] == 'Compra']
+                
+                igv_v = ventas_mes['IGV (18%)'].sum() if not ventas_mes.empty else 0.0
+                igv_c = compras_mes['IGV (18%)'].sum() if not compras_mes.empty else 0.0
+                total_v = ventas_mes['Total'].sum() if not ventas_mes.empty else 0.0
+                total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
+                
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric(f"Ventas Totales ({mes_seleccionado})", f"S/ {total_v:,.2f}")
+                d2.metric(f"Compras Totales ({mes_seleccionado})", f"S/ {total_c:,.2f}")
+                d3.metric("IGV Cobrado (Ventas)", f"S/ {igv_v:,.2f}")
+                d4.metric("IGV Pagado (Compras)", f"S/ {igv_c:,.2f}")
+                
+                st.divider()
+                st.write(f"### Resumen Comparativo de IGV - Periodo {mes_seleccionado}")
+                resumen_grafico = pd.DataFrame({
+                    "Concepto": ["IGV Ventas", "IGV Compras", "IGV Neto a Pagar"],
+                    "Monto (S/)": [igv_v, igv_c, max(0, igv_v - igv_c)]
+                }).set_index("Concepto")
+                
+                st.bar_chart(resumen_grafico)
+                
+                st.write("### 📋 Detalle de Comprobantes Registrados en este Mes")
+                st.dataframe(df_mes, use_container_width=True)
+            else:
+                st.info("No se encontraron fechas válidas en el historial registrado.")
+        else:
+            st.info("El Google Sheets aún no tiene registros guardados. Sube tu primer lote en la pestaña anterior.")
+    else:
+        st.error("No se pudo conectar con Google Sheets para cargar el historial.")
