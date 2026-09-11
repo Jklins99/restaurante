@@ -18,9 +18,7 @@ st.set_page_config(page_title="Gestor de Facturación - Restaurante", page_icon=
 
 # --- FUNCIONES DE GOOGLE (DRIVE Y SHEETS) ---
 def obtener_servicios_google():
-    """Conecta con Drive y Sheets simultáneamente"""
     creds_dict = st.secrets["gcp_service_account"]
-    # Solicitamos permiso para Drive y para Sheets
     scopes = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
     
@@ -29,30 +27,26 @@ def obtener_servicios_google():
     return drive_service, sheets_service
 
 def obtener_facturas_registradas(sheets_service):
-    """Descarga la lista de RUCs y Comprobantes ya guardados en el Excel para evitar duplicados"""
+    registradas = set()
     try:
         resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:D' # Leemos hasta la columna D (RUC)
+            spreadsheetId=SPREADSHEET_ID, range='A:D'
         ).execute()
         filas = resultado.get('values', [])
         
-        registradas = set()
-        for fila in filas[1:]: # Omitimos el encabezado
+        for fila in filas[1:]:
             if len(fila) >= 4:
-                # Creamos una llave única: RUC-COMPROBANTE (ej. 20123456789-F001-0001)
                 llave = f"{fila[3]}-{fila[2]}"
                 registradas.add(llave)
-        return registradas
-    except Exception as e:
-        st.warning("No se pudo leer el registro histórico. Verifica el ID del Sheet.")
-        return set()
+    except Exception:
+        pass
+    return registradas
 
 def guardar_en_sheets(sheets_service, datos, categoria):
-    """Añade una nueva fila al Google Sheets"""
     fila = [
-        datos['Fecha'], datos['Tipo'], datos['Comprobante'], datos['RUC'], 
-        datos['Razón Social'], datos['Base Imponible'], datos['IGV (18%)'], 
-        datos['Total'], categoria
+        str(datos['Fecha']), str(datos['Tipo']), str(datos['Comprobante']), str(datos['RUC']), 
+        str(datos['Razón Social']), float(datos['Base Imponible']), float(datos['IGV (18%)']), 
+        float(datos['Total']), str(categoria)
     ]
     cuerpo = {'values': [fila]}
     sheets_service.spreadsheets().values().append(
@@ -73,17 +67,19 @@ def obtener_o_crear_carpeta(drive_service, nombre_carpeta, parent_id):
 
 def subir_archivo_drive(file_obj, drive_service, id_dia):
     try:
-        file_obj.seek(0)
+        file_obj.seek(0) # Reiniciamos el puntero del archivo para leerlo desde el inicio
         media = MediaIoBaseUpload(io.BytesIO(file_obj.read()), mimetype='application/octet-stream', resumable=True)
         metadata = {'name': file_obj.name, 'parents': [id_dia]}
         drive_service.files().create(body=metadata, media_body=media, fields='id').execute()
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"Error subiendo archivo {file_obj.name}: {e}")
         return False
 
 # --- FUNCIONES DE EXTRACCIÓN (XML y PDF) ---
 def parse_sunat_xml(file_obj):
     try:
+        file_obj.seek(0)
         tree = ET.parse(file_obj)
         root = tree.getroot()
         ns = {'cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2', 'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'}
@@ -109,6 +105,7 @@ def parse_sunat_xml(file_obj):
 
 def procesar_factura_pdf(file_obj):
     try:
+        file_obj.seek(0)
         texto_completo = ""
         with pdfplumber.open(file_obj) as pdf:
             for page in pdf.pages:
@@ -138,17 +135,15 @@ st.title("🍽️ Gestor de Facturación - Sistema Anti-Duplicados")
 try:
     drive_service, sheets_service = obtener_servicios_google()
     facturas_ya_registradas = obtener_facturas_registradas(sheets_service)
-except Exception as e:
-    st.error("Esperando conexión con Google... Verifica los secretos en Streamlit.")
-    st.stop()
+except Exception:
+    facturas_ya_registradas = set()
 
 col1, col2 = st.columns(2)
 with col1:
-    ventas_files = st.file_uploader("📤 Ventas Emitidas (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True)
+    ventas_files = st.file_uploader("📤 Ventas Emitidas (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True, key="ventas")
 with col2:
-    compras_files = st.file_uploader("📥 Compras y Gastos (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True)
+    compras_files = st.file_uploader("📥 Compras y Gastos (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True, key="compras")
 
-# Procesamiento y Filtro Anti-Duplicados
 datos_procesados = []
 
 def analizar_y_filtrar(archivos, categoria):
@@ -169,7 +164,6 @@ df_todos = pd.DataFrame(datos_procesados)
 
 if not df_todos.empty:
     st.divider()
-    # Separar los válidos de los duplicados/errores
     df_validos = df_todos[df_todos['Estado'] == 'OK']
     
     total_igv_ventas = df_validos[df_validos['Categoría'] == 'Venta']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
@@ -185,26 +179,31 @@ if not df_todos.empty:
     
     duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
     if not duplicados.empty:
-        st.warning(f"¡Atención! Se detectaron {len(duplicados)} facturas que ya habían sido subidas anteriormente. El sistema las ignorará para no alterar tus impuestos.")
+        st.warning(f"¡Atención! Se detectaron {len(duplicados)} facturas que ya habían sido subidas anteriormente.")
 
     st.divider()
     if not df_validos.empty:
         if st.button("🚀 Registrar Archivos Nuevos y Subir a Drive", type="primary"):
             with st.spinner("Guardando en la base de datos y subiendo archivos..."):
-                hoy = datetime.datetime.now()
-                id_anio = obtener_o_crear_carpeta(drive_service, hoy.strftime('%Y'), CARPETA_RAIZ_ID)
-                id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
-                id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
-                
-                exitos = 0
-                for index, fila in df_validos.iterrows():
-                    # 1. Encontrar el archivo original
-                    archivo_original = next((f for f in (ventas_files + compras_files) if f.name == fila['Archivo']), None)
-                    if archivo_original:
-                        # 2. Subir a Drive
-                        if subir_archivo_drive(archivo_original, drive_service, id_dia):
-                            # 3. Anotar en Google Sheets
-                            guardar_en_sheets(sheets_service, fila, fila['Categoría'])
-                            exitos += 1
-                
-                st.success(f"¡Éxito! Se registraron {exitos} facturas nuevas en tu libro mayor y se guardaron en Drive.")
+                try:
+                    hoy = datetime.datetime.now()
+                    id_anio = obtener_o_crear_carpeta(drive_service, hoy.strftime('%Y'), CARPETA_RAIZ_ID)
+                    id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
+                    id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
+                    
+                    # Unimos todas las listas de archivos disponibles
+                    todos_los_subidos = (ventas_files or []) + (compras_files or [])
+                    
+                    exitos = 0
+                    for index, fila in df_validos.iterrows():
+                        archivo_original = next((f for f in todos_los_subidos if f.name == fila['Archivo']), None)
+                        if archivo_original:
+                            # 1. Subir archivo físico a Drive
+                            if subir_archivo_drive(archivo_original, drive_service, id_dia):
+                                # 2. Anotar en Google Sheets
+                                guardar_en_sheets(sheets_service, fila, fila['Categoría'])
+                                exitos += 1
+                    
+                    st.success(f"¡Éxito! Se registraron {exitos} facturas nuevas en tu libro mayor y se guardaron en Drive.")
+                except Exception as e:
+                    st.error(f"Ocurrió un error al procesar el registro: {e}")
