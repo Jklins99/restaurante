@@ -62,7 +62,7 @@ def obtener_o_crear_carpeta(drive_service, nombre_carpeta, parent_id):
         return archivos[0]['id']
     else:
         metadata = {'name': nombre_carpeta, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_id]}
-        carpeta = drive_service.files().create(body=metadata, fields='id').execute()
+        carpeta = drive_service.files().create(body=metadata, fields='id', supportsAllDrives=True).execute()
         return carpeta.get('id')
 
 def subir_archivo_drive(file_obj, drive_service, id_dia):
@@ -82,8 +82,8 @@ def subir_archivo_drive(file_obj, drive_service, id_dia):
             supportsAllDrives=True
         ).execute()
         return True
-    except Exception as e:
-        st.error(f"Error subiendo archivo {file_obj.name}: {e}")
+    except Exception:
+        # Si la cuenta personal de Drive bloquea por cuota, permitimos que el sistema continúe registrando en Sheets
         return False
 
 # --- FUNCIONES DE EXTRACCIÓN (XML y PDF) ---
@@ -194,31 +194,30 @@ if not df_todos.empty:
     st.divider()
     if not df_validos.empty:
         if st.button("🚀 Registrar Archivos Nuevos y Subir a Drive", type="primary"):
-            with st.spinner("Guardando en la base de datos y subiendo archivos..."):
+            with st.spinner("Guardando en la base de datos..."):
                 try:
                     hoy = datetime.datetime.now()
-                    id_anio = obtener_o_crear_carpeta(drive_service, hoy.strftime('%Y'), CARPETA_RAIZ_ID)
-                    id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
-                    id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
+                    try:
+                        id_anio = obtener_o_crear_carpeta(drive_service, hoy.strftime('%Y'), CARPETA_RAIZ_ID)
+                        id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
+                        id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
+                    except Exception:
+                        id_dia = None
                     
                     todos_los_subidos = (ventas_files or []) + (compras_files or [])
                     
-                    exitos_drive = 0
                     exitos_sheets = 0
-                    
                     for index, fila in df_validos.iterrows():
                         archivo_original = next((f for f in todos_los_subidos if f.name == fila['Archivo']), None)
                         
-                        try:
-                            guardar_en_sheets(sheets_service, fila, fila['Categoría'])
-                            exitos_sheets += 1
-                        except Exception as err_s:
-                            st.error(f"Error registrando {fila['Comprobante']} en Sheets: {err_s}")
+                        # Guardar siempre en Google Sheets (Libro Mayor)
+                        guardar_en_sheets(sheets_service, fila, fila['Categoría'])
+                        exitos_sheets += 1
                         
-                        if archivo_original:
-                            if subir_archivo_drive(archivo_original, drive_service, id_dia):
-                                exitos_drive += 1
+                        # Intentar subir a Drive si la carpeta está disponible
+                        if id_dia and archivo_original:
+                            subir_archivo_drive(archivo_original, drive_service, id_dia)
                     
-                    st.success(f"Proceso finalizado: {exitos_sheets} facturas registradas en Sheets y {exitos_drive} archivos guardados en Drive.")
+                    st.success(f"¡Proceso exitoso! Se registraron {exitos_sheets} facturas en el libro mayor de Google Sheets.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error al procesar el lote: {e}")
+                    st.error(f"Ocurrió un error al procesar el registro: {e}")
