@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 
 # === TUS CONFIGURACIONES ===
 SPREADSHEET_ID = '1811VY4-Xa4ZOf7j6MVd5zYFCdhpyxdtuwq1pD5mHlh4'
-RUC_RESTAURANTE = '10402504051' # Tu RUC para detectar ventas automáticas
+RUC_RESTAURANTE = '10402504051'
 # =========================
 
 st.set_page_config(page_title="Gestor de Facturación - Restaurante", page_icon="🍽️", layout="wide")
@@ -44,9 +44,22 @@ def descargar_historial_sheets(sheets_service):
         ).execute()
         filas = resultado.get('values', [])
         if len(filas) > 1:
-            cabeceras = filas[0]
+            cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV (18%)', 'Total', 'Categoría']
             datos = filas[1:]
-            df = pd.DataFrame(datos, columns=cabeceras[:len(datos[0])])
+            
+            datos_normalizados = []
+            for fila in datos:
+                while len(fila) < len(cabeceras):
+                    fila.append("0")
+                datos_normalizados.append(fila[:len(cabeceras)])
+                
+            df = pd.DataFrame(datos_normalizados, columns=cabeceras)
+            
+            # Limpieza profunda de formato monetario (removiendo comas y espacios)
+            for col in ['Base Imponible', 'IGV (18%)', 'Total']:
+                df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+                
             return df
     except Exception:
         pass
@@ -124,29 +137,7 @@ def procesar_factura_pdf(file_obj):
         }
     except Exception:
         return {"Archivo": file_obj.name, "Tipo": "PDF", "Categoría": "Compra", "Estado": "Error de lectura"}
-def descargar_historial_sheets(sheets_service):
-    try:
-        resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:I'
-        ).execute()
-        filas = resultado.get('values', [])
-        if len(filas) > 1:
-            # Forzamos las cabeceras exactas para evitar desalineación de columnas
-            cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV (18%)', 'Total', 'Categoría']
-            datos = filas[1:]
-            
-            # Normalizamos cada fila para que tenga exactamente 9 columnas
-            datos_normalizados = []
-            for fila in datos:
-                while len(fila) < len(cabeceras):
-                    fila.append(0)
-                datos_normalizados.append(fila[:len(cabeceras)])
-                
-            df = pd.DataFrame(datos_normalizados, columns=cabeceras)
-            return df
-    except Exception:
-        pass
-    return pd.DataFrame()
+
 # --- INTERFAZ ---
 st.title("🍽️ Gestor de Facturación - Restaurante")
 
@@ -219,11 +210,6 @@ with tab2:
             df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'], errors='coerce')
             df_historial['Mes'] = df_historial['Fecha'].dt.to_period('M').astype(str)
             
-            # Corrección de errores en conversión numérica usando 'coerce'
-            df_historial['Base Imponible'] = pd.to_numeric(df_historial['Base Imponible'], errors='coerce').fillna(0)
-            df_historial['IGV (18%)'] = pd.to_numeric(df_historial['IGV (18%)'], errors='coerce').fillna(0)
-            df_historial['Total'] = pd.to_numeric(df_historial['Total'], errors='coerce').fillna(0)
-            
             meses_disponibles = sorted(df_historial['Mes'].dropna().unique(), reverse=True)
             if meses_disponibles:
                 mes_seleccionado = st.selectbox("📅 Selecciona el Periodo (Mes)", meses_disponibles)
@@ -236,7 +222,7 @@ with tab2:
                 igv_v = ventas_mes['IGV (18%)'].sum() if not ventas_mes.empty else 0.0
                 igv_c = compras_mes['IGV (18%)'].sum() if not compras_mes.empty else 0.0
                 total_v = ventas_mes['Total'].sum() if not ventas_mes.empty else 0.0
-                total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
+                total_c = compras_mes['Total'].sum() if not ventas_mes.empty else 0.0
                 
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric(f"Ventas Totales ({mes_seleccionado})", f"S/ {total_v:,.2f}")
