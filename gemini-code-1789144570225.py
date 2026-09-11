@@ -67,10 +67,21 @@ def obtener_o_crear_carpeta(drive_service, nombre_carpeta, parent_id):
 
 def subir_archivo_drive(file_obj, drive_service, id_dia):
     try:
-        file_obj.seek(0) # Reiniciamos el puntero del archivo para leerlo desde el inicio
-        media = MediaIoBaseUpload(io.BytesIO(file_obj.read()), mimetype='application/octet-stream', resumable=True)
+        file_obj.seek(0)
+        media = MediaIoBaseUpload(
+            io.BytesIO(file_obj.read()), 
+            mimetype='application/octet-stream', 
+            resumable=True
+        )
         metadata = {'name': file_obj.name, 'parents': [id_dia]}
-        drive_service.files().create(body=metadata, media_body=media, fields='id').execute()
+        
+        # supportsAllDrives=True evita la restricción de cuota en Service Accounts
+        drive_service.files().create(
+            body=metadata, 
+            media_body=media, 
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
         return True
     except Exception as e:
         st.error(f"Error subiendo archivo {file_obj.name}: {e}")
@@ -182,7 +193,7 @@ if not df_todos.empty:
         st.warning(f"¡Atención! Se detectaron {len(duplicados)} facturas que ya habían sido subidas anteriormente.")
 
     st.divider()
-    if not df_validos.empty:
+  if not df_validos.empty:
         if st.button("🚀 Registrar Archivos Nuevos y Subir a Drive", type="primary"):
             with st.spinner("Guardando en la base de datos y subiendo archivos..."):
                 try:
@@ -191,19 +202,26 @@ if not df_todos.empty:
                     id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
                     id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
                     
-                    # Unimos todas las listas de archivos disponibles
                     todos_los_subidos = (ventas_files or []) + (compras_files or [])
                     
-                    exitos = 0
+                    exitos_drive = 0
+                    exitos_sheets = 0
+                    
                     for index, fila in df_validos.iterrows():
                         archivo_original = next((f for f in todos_los_subidos if f.name == fila['Archivo']), None)
+                        
+                        # 1. Registro obligatorio en Google Sheets (Libro Mayor)
+                        try:
+                            guardar_en_sheets(sheets_service, fila, fila['Categoría'])
+                            exitos_sheets += 1
+                        except Exception as err_s:
+                            st.error(f"Error registrando {fila['Comprobante']} en Sheets: {err_s}")
+                        
+                        # 2. Subida física del archivo a Drive
                         if archivo_original:
-                            # 1. Subir archivo físico a Drive
                             if subir_archivo_drive(archivo_original, drive_service, id_dia):
-                                # 2. Anotar en Google Sheets
-                                guardar_en_sheets(sheets_service, fila, fila['Categoría'])
-                                exitos += 1
+                                exitos_drive += 1
                     
-                    st.success(f"¡Éxito! Se registraron {exitos} facturas nuevas en tu libro mayor y se guardaron en Drive.")
+                    st.success(f"Proceso finalizado: {exitos_sheets} facturas registradas en Sheets y {exitos_drive} archivos guardados en Drive.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error al procesar el registro: {e}")
+                    st.error(f"Ocurrió un error al procesar el lote: {e}")
