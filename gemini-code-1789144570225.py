@@ -7,24 +7,20 @@ import io
 import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
-# === TUS IDs DE GOOGLE ===
-CARPETA_RAIZ_ID = '1RC6qUV87m5R0PLmQUTLn8cgQUbtitqUs'
+# === TUS CONFIGURACIONES ===
 SPREADSHEET_ID = '1811VY4-Xa4ZOf7j6MVd5zYFCdhpyxdtuwq1pD5mHlh4'
+RUC_RESTAURANTE = '10402504051' # Tu RUC para detectar ventas automáticas
 # =========================
 
 st.set_page_config(page_title="Gestor de Facturación - Restaurante", page_icon="🍽️", layout="wide")
 
-# --- FUNCIONES DE GOOGLE (DRIVE Y SHEETS) ---
-def obtener_servicios_google():
+# --- FUNCIONES DE GOOGLE SHEETS ---
+def obtener_servicio_sheets():
     creds_dict = st.secrets["gcp_service_account"]
-    scopes = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+    scopes = ['https://www.googleapis.com/auth/spreadsheets']
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    
-    drive_service = build('drive', 'v3', credentials=creds)
-    sheets_service = build('sheets', 'v4', credentials=creds)
-    return drive_service, sheets_service
+    return build('sheets', 'v4', credentials=creds)
 
 def obtener_facturas_registradas(sheets_service):
     registradas = set()
@@ -54,39 +50,7 @@ def guardar_en_sheets(sheets_service, datos, categoria):
         valueInputOption='USER_ENTERED', body=cuerpo
     ).execute()
 
-def obtener_o_crear_carpeta(drive_service, nombre_carpeta, parent_id):
-    query = f"name='{nombre_carpeta}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    resultados = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    archivos = resultados.get('files', [])
-    if archivos:
-        return archivos[0]['id']
-    else:
-        metadata = {'name': nombre_carpeta, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_id]}
-        carpeta = drive_service.files().create(body=metadata, fields='id', supportsAllDrives=True).execute()
-        return carpeta.get('id')
-
-def subir_archivo_drive(file_obj, drive_service, id_dia):
-    try:
-        file_obj.seek(0)
-        media = MediaIoBaseUpload(
-            io.BytesIO(file_obj.read()), 
-            mimetype='application/octet-stream', 
-            resumable=True
-        )
-        metadata = {'name': file_obj.name, 'parents': [id_dia]}
-        
-        drive_service.files().create(
-            body=metadata, 
-            media_body=media, 
-            fields='id',
-            supportsAllDrives=True
-        ).execute()
-        return True
-    except Exception:
-        # Si la cuenta personal de Drive bloquea por cuota, permitimos que el sistema continúe registrando en Sheets
-        return False
-
-# --- FUNCIONES DE EXTRACCIÓN (XML y PDF) ---
+# --- EXTRACCIÓN Y CLASIFICACIÓN AUTOMÁTICA (XML y PDF) ---
 def parse_sunat_xml(file_obj):
     try:
         file_obj.seek(0)
@@ -103,15 +67,20 @@ def parse_sunat_xml(file_obj):
         
         total = float(total_node.text) if total_node is not None else 0.0
         igv = float(igv_node.text) if igv_node is not None else 0.0
+        ruc_val = ruc.text if ruc is not None else 'N/A'
+        
+        # Clasificación automática por RUC
+        categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
             "Archivo": file_obj.name, "Tipo": "XML", "Fecha": fecha.text if fecha is not None else 'N/A',
             "Comprobante": serie_numero.text if serie_numero is not None else 'N/A',
-            "RUC": ruc.text if ruc is not None else 'N/A', "Razón Social": razon_social.text if razon_social is not None else 'N/A',
-            "Base Imponible": round(total - igv, 2), "IGV (18%)": round(igv, 2), "Total": round(total, 2), "Estado": "OK"
+            "RUC": ruc_val, "Razón Social": razon_social.text if razon_social is not None else 'N/A',
+            "Base Imponible": round(total - igv, 2), "IGV (18%)": round(igv, 2), "Total": round(total, 2), 
+            "Categoría": categoria, "Estado": "OK"
         }
     except Exception:
-        return {"Archivo": file_obj.name, "Tipo": "XML", "Estado": "Error de lectura"}
+        return {"Archivo": file_obj.name, "Tipo": "XML", "Categoría": "Compra", "Estado": "Error de lectura"}
 
 def procesar_factura_pdf(file_obj):
     try:
@@ -129,46 +98,45 @@ def procesar_factura_pdf(file_obj):
         total = float(total_match.group(1).replace(',', '')) if total_match else 0.0
         base_imponible = total / 1.18 if total > 0 else 0.0
         igv = total - base_imponible if total > 0 else 0.0
+        ruc_val = ruc_match.group(0) if ruc_match else 'N/A'
+        
+        # Clasificación automática por RUC
+        categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
             "Archivo": file_obj.name, "Tipo": "PDF", "Fecha": datetime.datetime.now().strftime('%Y-%m-%d'),
-            "Comprobante": serie_match.group(0) if serie_match else "N/A", "RUC": ruc_match.group(0) if ruc_match else "N/A",
+            "Comprobante": serie_match.group(0) if serie_match else "N/A", "RUC": ruc_val,
             "Razón Social": "Por verificar (PDF)", "Base Imponible": round(base_imponible, 2),
-            "IGV (18%)": round(igv, 2), "Total": round(total, 2), "Estado": "OK" if total > 0 else "Revisar Manualmente"
+            "IGV (18%)": round(igv, 2), "Total": round(total, 2), "Categoría": categoria, 
+            "Estado": "OK" if total > 0 else "Revisar Manualmente"
         }
     except Exception:
-        return {"Archivo": file_obj.name, "Tipo": "PDF", "Estado": "Error de lectura"}
+        return {"Archivo": file_obj.name, "Tipo": "PDF", "Categoría": "Compra", "Estado": "Error de lectura"}
 
 # --- INTERFAZ ---
-st.title("🍽️ Gestor de Facturación - Sistema Anti-Duplicados")
+st.title("🍽️ Gestor de Facturación - Sistema Automático Anti-Duplicados")
+st.write("Sube todos tus comprobantes (XML o PDF) juntos en la siguiente bandeja. El sistema detectará automáticamente si es Venta o Compra.")
 
 try:
-    drive_service, sheets_service = obtener_servicios_google()
+    sheets_service = obtener_servicio_sheets()
     facturas_ya_registradas = obtener_facturas_registradas(sheets_service)
 except Exception:
     facturas_ya_registradas = set()
 
-col1, col2 = st.columns(2)
-with col1:
-    ventas_files = st.file_uploader("📤 Ventas Emitidas (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True, key="ventas")
-with col2:
-    compras_files = st.file_uploader("📥 Compras y Gastos (XML/PDF)", type=['xml', 'pdf'], accept_multiple_files=True, key="compras")
+# ÚNICO BOTÓN DE CARGA GENERAL
+archivos_subidos = st.file_uploader("📂 Arrastra o selecciona tus archivos (XML / PDF)", type=['xml', 'pdf'], accept_multiple_files=True)
 
 datos_procesados = []
 
-def analizar_y_filtrar(archivos, categoria):
-    for f in archivos:
+if archivos_subidos:
+    for f in archivos_subidos:
         datos = parse_sunat_xml(f) if f.name.lower().endswith('.xml') else procesar_factura_pdf(f)
         llave_actual = f"{datos.get('RUC')}-{datos.get('Comprobante')}"
         
         if llave_actual in facturas_ya_registradas and datos.get('RUC') != 'N/A':
             datos['Estado'] = '⚠️ Duplicado'
-        
-        datos['Categoría'] = categoria
+            
         datos_procesados.append(datos)
-
-if ventas_files: analizar_y_filtrar(ventas_files, "Venta")
-if compras_files: analizar_y_filtrar(compras_files, "Compra")
 
 df_todos = pd.DataFrame(datos_procesados)
 
@@ -180,44 +148,27 @@ if not df_todos.empty:
     total_igv_compras = df_validos[df_validos['Categoría'] == 'Compra']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
     
     m1, m2, m3 = st.columns(3)
-    m1.metric("IGV Nuevo Cobrado (Ventas)", f"S/ {total_igv_ventas:,.2f}")
-    m2.metric("Nuevo Crédito Fiscal (Compras)", f"S/ {total_igv_compras:,.2f}")
-    m3.metric("IGV NETO (Este lote)", f"S/ {max(0, total_igv_ventas - total_igv_compras):,.2f}")
+    m1.metric("IGV Ventas Detectadas", f"S/ {total_igv_ventas:,.2f}")
+    m2.metric("Crédito Fiscal Compras", f"S/ {total_igv_compras:,.2f}")
+    m3.metric("IGV NETO Estimado", f"S/ {max(0, total_igv_ventas - total_igv_compras):,.2f}")
     
-    st.write("### Vista Previa de Archivos Subidos")
-    st.dataframe(df_todos.drop(columns=['Categoría']), use_container_width=True)
+    st.write("### Vista Previa y Clasificación Automática")
+    st.dataframe(df_todos, use_container_width=True)
     
     duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
     if not duplicados.empty:
-        st.warning(f"¡Atención! Se detectaron {len(duplicados)} facturas que ya habían sido subidas anteriormente.")
+        st.warning(f"¡Atención! Se detectaron {len(duplicados)} comprobantes duplicados que ya están registrados en el Excel.")
 
     st.divider()
     if not df_validos.empty:
-        if st.button("🚀 Registrar Archivos Nuevos y Subir a Drive", type="primary"):
+        if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
             with st.spinner("Guardando en la base de datos..."):
                 try:
-                    hoy = datetime.datetime.now()
-                    try:
-                        id_anio = obtener_o_crear_carpeta(drive_service, hoy.strftime('%Y'), CARPETA_RAIZ_ID)
-                        id_mes = obtener_o_crear_carpeta(drive_service, hoy.strftime('%m-%B'), id_anio)
-                        id_dia = obtener_o_crear_carpeta(drive_service, hoy.strftime('%d-%m-%Y'), id_mes)
-                    except Exception:
-                        id_dia = None
-                    
-                    todos_los_subidos = (ventas_files or []) + (compras_files or [])
-                    
-                    exitos_sheets = 0
+                    exitos = 0
                     for index, fila in df_validos.iterrows():
-                        archivo_original = next((f for f in todos_los_subidos if f.name == fila['Archivo']), None)
-                        
-                        # Guardar siempre en Google Sheets (Libro Mayor)
                         guardar_en_sheets(sheets_service, fila, fila['Categoría'])
-                        exitos_sheets += 1
-                        
-                        # Intentar subir a Drive si la carpeta está disponible
-                        if id_dia and archivo_original:
-                            subir_archivo_drive(archivo_original, drive_service, id_dia)
+                        exitos += 1
                     
-                    st.success(f"¡Proceso exitoso! Se registraron {exitos_sheets} facturas en el libro mayor de Google Sheets.")
+                    st.success(f"¡Proceso exitoso! Se registraron {exitos} comprobantes en tu libro mayor de Google Sheets.")
                 except Exception as e:
-                    st.error(f"Ocurrió un error al procesar el registro: {e}")
+                    st.error(f"Ocurrió un error al registrar en Sheets: {e}")
