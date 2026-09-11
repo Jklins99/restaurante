@@ -124,7 +124,29 @@ def procesar_factura_pdf(file_obj):
         }
     except Exception:
         return {"Archivo": file_obj.name, "Tipo": "PDF", "Categoría": "Compra", "Estado": "Error de lectura"}
-
+def descargar_historial_sheets(sheets_service):
+    try:
+        resultado = sheets_service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range='A:I'
+        ).execute()
+        filas = resultado.get('values', [])
+        if len(filas) > 1:
+            # Forzamos las cabeceras exactas para evitar desalineación de columnas
+            cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV (18%)', 'Total', 'Categoría']
+            datos = filas[1:]
+            
+            # Normalizamos cada fila para que tenga exactamente 9 columnas
+            datos_normalizados = []
+            for fila in datos:
+                while len(fila) < len(cabeceras):
+                    fila.append(0)
+                datos_normalizados.append(fila[:len(cabeceras)])
+                
+            df = pd.DataFrame(datos_normalizados, columns=cabeceras)
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame()
 # --- INTERFAZ ---
 st.title("🍽️ Gestor de Facturación - Restaurante")
 
