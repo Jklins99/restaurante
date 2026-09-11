@@ -191,8 +191,7 @@ if not df_todos.empty:
     duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
     if not duplicados.empty:
         st.warning(f"¡Atención! Se detectaron {len(duplicados)} facturas que ya habían sido subidas anteriormente.")
-
-    st.divider()
+        st.divider()
   if not df_validos.empty:
         if st.button("🚀 Registrar Archivos Nuevos y Subir a Drive", type="primary"):
             with st.spinner("Guardando en la base de datos y subiendo archivos..."):
