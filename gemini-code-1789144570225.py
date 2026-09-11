@@ -169,12 +169,11 @@ if sheets_service:
             total_v = ventas_mes['Total'].sum() if not ventas_mes.empty else 0.0
             total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
             
-            # Cálculo de IGV a Pagar o Saldo a Favor
             diferencia_igv = igv_v - igv_c
             igv_neto_pagar = max(0.0, diferencia_igv)
             saldo_a_favor = abs(min(0.0, diferencia_igv))
             
-            # --- MÉTRICAS PRINCIPALES EN 4 COLUMNAS ---
+            # --- TARJETAS DE MÉTRICAS ---
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"Ventas Totales ({mes_seleccionado})", f"S/ {total_v:,.2f}")
             c2.metric(f"Compras Totales ({mes_seleccionado})", f"S/ {total_c:,.2f}")
@@ -186,10 +185,12 @@ if sheets_service:
                 c4.metric("🏛️ A PAGAR A SUNAT", f"S/ {igv_neto_pagar:,.2f}")
             
             st.divider()
-            st.write(f"### Resumen Comparativo de IGV - Periodo {mes_seleccionado}")
+            
+            # --- GRÁFICO SIMPLIFICADO Y LIMPIO ---
+            st.write(f"### ⚖️ Comparativa de IGV (Ventas vs Compras) - Periodo {mes_seleccionado}")
             resumen_grafico = pd.DataFrame({
-                "Concepto": ["IGV Ventas", "IGV Compras", "IGV Neto a Pagar", "Saldo a Favor"],
-                "Monto (S/)": [igv_v, igv_c, igv_neto_pagar, saldo_a_favor]
+                "Concepto": ["IGV Ventas", "IGV Compras"],
+                "Monto (S/)": [igv_v, igv_c]
             }).set_index("Concepto")
             
             st.bar_chart(resumen_grafico)
