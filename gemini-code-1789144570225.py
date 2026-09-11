@@ -38,7 +38,6 @@ def obtener_facturas_registradas(sheets_service):
     return registradas
 
 def descargar_historial_sheets(sheets_service):
-    """Descarga todo el contenido del Google Sheets para armar el Dashboard"""
     try:
         resultado = sheets_service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID, range='A:I'
@@ -136,7 +135,6 @@ except Exception:
     sheets_service = None
     facturas_ya_registradas = set()
 
-# --- PESTAÑAS DE NAVEGACIÓN ---
 tab1, tab2 = st.tabs(["📤 Subir y Procesar Lote", "📊 Dashboard y Registros Históricos"])
 
 with tab1:
@@ -196,14 +194,14 @@ with tab2:
     if sheets_service:
         df_historial = descargar_historial_sheets(sheets_service)
         if not df_historial.empty:
-            # Limpieza y preparación de datos
             df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'], errors='coerce')
             df_historial['Mes'] = df_historial['Fecha'].dt.to_period('M').astype(str)
-            df_historial['Base Imponible'] = pd.to_numeric(df_historial['Base Imponible'], errors='fillna').fillna(0)
-            df_historial['IGV (18%)'] = pd.to_numeric(df_historial['IGV (18%)'], errors='fillna').fillna(0)
-            df_historial['Total'] = pd.to_numeric(df_historial['Total'], errors='fillna').fillna(0)
             
-            # Filtro por Mes
+            # Corrección de errores en conversión numérica usando 'coerce'
+            df_historial['Base Imponible'] = pd.to_numeric(df_historial['Base Imponible'], errors='coerce').fillna(0)
+            df_historial['IGV (18%)'] = pd.to_numeric(df_historial['IGV (18%)'], errors='coerce').fillna(0)
+            df_historial['Total'] = pd.to_numeric(df_historial['Total'], errors='coerce').fillna(0)
+            
             meses_disponibles = sorted(df_historial['Mes'].dropna().unique(), reverse=True)
             if meses_disponibles:
                 mes_seleccionado = st.selectbox("📅 Selecciona el Periodo (Mes)", meses_disponibles)
