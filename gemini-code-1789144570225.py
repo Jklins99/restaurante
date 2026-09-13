@@ -158,13 +158,13 @@ def obtener_facturas_registradas(sheets_service):
     registradas = set()
     try:
         resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:D'
+            spreadsheetId=SPREADSHEET_ID, range='A:K'
         ).execute()
         filas = resultado.get('values', [])
         
         for fila in filas[1:]:
             if len(fila) >= 4:
-                llave = f"{fila[3]}-{fila[2]}"
+                llave = f"{fila[3]}-{fila[2]}"  # RUC-Comprobante
                 registradas.add(llave)
     except Exception:
         pass
@@ -173,11 +173,12 @@ def obtener_facturas_registradas(sheets_service):
 def descargar_historial_sheets(sheets_service):
     try:
         resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:I'
+            spreadsheetId=SPREADSHEET_ID, range='A:K'
         ).execute()
         filas = resultado.get('values', [])
         if len(filas) > 1:
-            cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV (18%)', 'Total', 'Categoría']
+            # Cabeceras con columnas nuevas de documento y tasa
+            cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV', 'Total', 'Categoría', 'Documento', 'Tasa %']
             datos = filas[1:]
             
             datos_normalizados = []
@@ -188,9 +189,11 @@ def descargar_historial_sheets(sheets_service):
                 
             df = pd.DataFrame(datos_normalizados, columns=cabeceras)
             
-            for col in ['Base Imponible', 'IGV (18%)', 'Total']:
-                df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            # Normalizar columnas numéricas
+            for col in ['Base Imponible', 'IGV', 'Total', 'Tasa %']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
                 
             return df
     except Exception:
@@ -397,9 +400,9 @@ if sheets_service:
             with cols[2]:
                 st.markdown(f"""
                     <div class="metric-card">
-                        <div class="metric-label">📈 IGV del Mes</div>
-                        <div class="metric-value">S/ {diferencia_igv:,.2f}</div>
-                        <div style="font-size: 0.75em; color: #999; margin-top: 0.5em;">Ventas: S/ {igv_v:,.2f} - Compras: S/ {igv_c:,.2f}</div>
+                        <div class="metric-label">📈 IGV Neto del Mes</div>
+                        <div class="metric-value">{'+' if diferencia_igv >= 0 else '-'} S/ {abs(diferencia_igv):,.2f}</div>
+                        <div style="font-size: 0.75em; color: #999; margin-top: 0.5em;">Cobrado: S/ {igv_v:,.2f} | Crédito: S/ {igv_c:,.2f}</div>
                     </div>
                     """, unsafe_allow_html=True)
             
@@ -552,6 +555,29 @@ if sheets_service:
         st.info("📭 El Google Sheets aún no tiene registros guardados. Sube tu primer lote abajo.")
 else:
     st.error("❌ No se pudo conectar con Google Sheets para cargar el historial.")
+
+st.divider()
+
+# --- INFORMACIÓN SOBRE TASAS DE IGV ---
+with st.expander("ℹ️ Tasas de IGV: Boletas vs Facturas"):
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        st.markdown("""
+            **🧾 BOLETAS ELECTRÓNICAS (B)**
+            - Serie comienza con: **B**
+            - Tasa de IGV: **10.5%**
+            - Comprador: Persona natural
+            - Ejemplo: B001-000123
+        """)
+    with col_info2:
+        st.markdown("""
+            **📋 FACTURAS ELECTRÓNICAS (F)**
+            - Serie comienza con: **F**
+            - Tasa de IGV: **18%**
+            - Comprador: Empresa/RUC
+            - Ejemplo: F001-000456
+        """)
+    st.info("💡 El sistema detecta automáticamente la tasa según el tipo de documento")
 
 st.divider()
 
