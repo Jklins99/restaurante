@@ -330,8 +330,27 @@ if sheets_service:
             total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
             
             diferencia_igv = igv_v - igv_c
-            igv_neto_pagar = max(0.0, diferencia_igv)
-            saldo_a_favor = abs(min(0.0, diferencia_igv))
+            saldo_a_favor_mes = abs(min(0.0, diferencia_igv))
+            
+            # Calcular saldo a favor del mes anterior
+            fecha_mes_seleccionado = pd.Period(mes_seleccionado, freq='M')
+            fecha_mes_anterior = fecha_mes_seleccionado - 1
+            mes_anterior_str = fecha_mes_anterior.strftime('%Y-%m')
+            
+            saldo_anterior = 0.0
+            if mes_anterior_str in df_historial['Mes'].values:
+                df_mes_anterior = df_historial[df_historial['Mes'] == mes_anterior_str]
+                ventas_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Venta']
+                compras_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Compra']
+                
+                igv_v_ant = ventas_ant['IGV (18%)'].sum() if not ventas_ant.empty else 0.0
+                igv_c_ant = compras_ant['IGV (18%)'].sum() if not compras_ant.empty else 0.0
+                diferencia_anterior = igv_v_ant - igv_c_ant
+                saldo_anterior = abs(min(0.0, diferencia_anterior))
+            
+            # Calcular IGV final considerando saldo anterior
+            igv_neto_pagar = max(0.0, diferencia_igv - saldo_anterior)
+            saldo_a_favor = max(0.0, saldo_anterior - diferencia_igv)
             
             # --- TARJETAS DE MÉTRICAS MEJORADAS ---
             cols = st.columns(4, gap="medium")
@@ -355,31 +374,81 @@ if sheets_service:
             with cols[2]:
                 st.markdown(f"""
                     <div class="metric-card">
-                        <div class="metric-label">📈 IGV Cobrado</div>
-                        <div class="metric-value">S/ {igv_v:,.2f}</div>
+                        <div class="metric-label">📈 IGV del Mes</div>
+                        <div class="metric-value">S/ {diferencia_igv:,.2f}</div>
+                        <div style="font-size: 0.75em; color: #999; margin-top: 0.5em;">Ventas: S/ {igv_v:,.2f} - Compras: S/ {igv_c:,.2f}</div>
                     </div>
                     """, unsafe_allow_html=True)
             
             with cols[3]:
+                if saldo_anterior > 0:
+                    st.markdown(f"""
+                        <div class="metric-card" style="border-left-color: #FF6F00;">
+                            <div class="metric-label">↙️ Saldo Anterior</div>
+                            <div class="metric-value" style="color: #FF6F00; font-size: 1.5em;">S/ {saldo_anterior:,.2f}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">✓ Sin Saldo Anterior</div>
+                            <div class="metric-value" style="color: #666; font-size: 1.5em;">-</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            st.divider()
+            
+            # --- RESUMEN FINAL CON COMPENSACIÓN ---
+            st.markdown('<p class="subtitle">📋 Resumen Final (Considerando Arrastre)</p>', unsafe_allow_html=True)
+            
+            cols_resumen = st.columns(3, gap="medium")
+            
+            with cols_resumen[0]:
+                st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-label">IGV Neto del Mes</div>
+                        <div class="metric-value" style="color: #1565C0;">{'+' if diferencia_igv >= 0 else '-'} S/ {abs(diferencia_igv):,.2f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            with cols_resumen[1]:
+                if saldo_anterior > 0:
+                    st.markdown(f"""
+                        <div class="metric-card" style="border-left-color: #FF6F00;">
+                            <div class="metric-label">Menos Saldo Anterior</div>
+                            <div class="metric-value" style="color: #FF6F00;">- S/ {saldo_anterior:,.2f}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-label">Menos Saldo Anterior</div>
+                            <div class="metric-value" style="color: #999;">-</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            
+            with cols_resumen[2]:
                 if saldo_a_favor > 0:
                     st.markdown(f"""
                         <div class="metric-card">
-                            <div class="metric-label">💚 SALDO A TU FAVOR</div>
-                            <div class="metric-value">S/ {saldo_a_favor:,.2f}</div>
+                            <div class="metric-label">💚 RESULTADO</div>
+                            <div class="metric-value" style="color: #2E7D32;">SALDO A FAVOR</div>
+                            <div style="font-size: 1.3em; color: #2E7D32; font-weight: 700; margin-top: 0.3em;">S/ {saldo_a_favor:,.2f}</div>
                         </div>
                         """, unsafe_allow_html=True)
                 else:
                     st.markdown(f"""
                         <div class="metric-card alert">
-                            <div class="metric-label">🏛️ POR PAGAR A SUNAT</div>
-                            <div class="metric-value">S/ {igv_neto_pagar:,.2f}</div>
+                            <div class="metric-label">🏛️ RESULTADO</div>
+                            <div class="metric-value" style="color: #D32F2F;">POR PAGAR</div>
+                            <div style="font-size: 1.3em; color: #D32F2F; font-weight: 700; margin-top: 0.3em;">S/ {igv_neto_pagar:,.2f}</div>
                         </div>
                         """, unsafe_allow_html=True)
             
             st.divider()
             
             # --- GRÁFICO MEJORADO ---
-            st.markdown('<p class="subtitle">Comparativa IGV del Periodo</p>', unsafe_allow_html=True)
+            st.markdown('<p class="subtitle">📊 Análisis de IGV del Periodo</p>', unsafe_allow_html=True)
             
             col_grafico1, col_grafico2 = st.columns(2)
             
@@ -389,6 +458,7 @@ if sheets_service:
                     "Monto (S/)": [igv_v, igv_c]
                 }).set_index("Concepto")
                 st.bar_chart(resumen_grafico)
+                st.caption("Diferencia del mes: IGV generado por ventas vs crédito por compras")
             
             with col_grafico2:
                 # Resumen de cantidad de documentos
@@ -397,6 +467,7 @@ if sheets_service:
                     "Cantidad": [len(ventas_mes), len(compras_mes)]
                 }).set_index("Tipo")
                 st.bar_chart(resumen_docs)
+                st.caption(f"Total documentos: {len(ventas_mes) + len(compras_mes)}")
             
             st.divider()
             
