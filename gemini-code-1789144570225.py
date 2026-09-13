@@ -249,6 +249,24 @@ def procesar_factura_pdf(file_obj):
                 texto = page.extract_text()
                 if texto: texto_completo += texto + "\n"
         
+        # --- EXTRAER FECHA DEL DOCUMENTO ---
+        fecha_documento = None
+        
+        # Buscar formato: DD/MM/YYYY (formato peruano típico)
+        fecha_match = re.search(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b', texto_completo)
+        
+        if fecha_match:
+            try:
+                dia, mes, anio = fecha_match.groups()
+                # Convertir a datetime para validar
+                fecha_documento = datetime.datetime(int(anio), int(mes), int(dia))
+                fecha_str = fecha_documento.strftime('%Y-%m-%d')
+            except:
+                fecha_str = datetime.datetime.now().strftime('%Y-%m-%d')
+        else:
+            # Si no encuentra fecha, usar la actual como fallback
+            fecha_str = datetime.datetime.now().strftime('%Y-%m-%d')
+        
         ruc_match = re.search(r'\b(10|20)\d{9}\b', texto_completo)
         serie_match = re.search(r'\b[F|E|B][A-Z0-9]{3}-\d{1,8}\b', texto_completo)
         total_match = re.search(r'(?:TOTAL|Total|Importe Total).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo)
@@ -261,7 +279,7 @@ def procesar_factura_pdf(file_obj):
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
-            "Archivo": file_obj.name, "Tipo": "PDF", "Fecha": datetime.datetime.now().strftime('%Y-%m-%d'),
+            "Archivo": file_obj.name, "Tipo": "PDF", "Fecha": fecha_str,
             "Comprobante": serie_match.group(0) if serie_match else "N/A", "RUC": ruc_val,
             "Razón Social": "Por verificar (PDF)", "Base Imponible": round(base_imponible, 2),
             "IGV (18%)": round(igv, 2), "Total": round(total, 2), "Categoría": categoria, 
