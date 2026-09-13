@@ -58,7 +58,7 @@ def obtener_facturas_registradas(sheets_service):
         filas = resultado.get('values', [])
         for fila in filas[1:]:
             if len(fila) >= 4:
-                llave = f"{fila[3]}-{fila[2]}"  # RUC-Comprobante
+                llave = f"{fila[3]}-{fila[2]}"  
                 registradas.add(llave)
     except Exception:
         pass
@@ -95,7 +95,7 @@ def guardar_lote_en_sheets(sheets_service, df_validos):
             str(datos.get('Fecha', '')), str(datos.get('Tipo', '')), str(datos.get('Comprobante', '')), 
             str(datos.get('RUC', '')), str(datos.get('Razón Social', '')), float(datos.get('Base Imponible', 0.0)), 
             float(datos.get('IGV', 0.0)), float(datos.get('Total', 0.0)), str(datos.get('Categoría', '')), 
-            str(datos.get('Documento', 'N/A')), "N/A"  # Columna Tasa vacía para mantener estructura
+            str(datos.get('Documento', 'N/A')), "N/A"  
         ]
         valores.append(fila)
     if valores:
@@ -230,7 +230,6 @@ def procesar_factura_pdf(file_obj):
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         razon_social = "Por verificar (PDF)"
-        # Regex actualizado para soportar el formato Señor(es) de SUNAT
         rs_match = re.search(r'(?:Señor\(es\)|Señor(?:es)?|Cliente|Razón Social|Nombre)\s*:\s*([^\n]+)', texto_completo, re.IGNORECASE)
         
         if rs_match:
@@ -265,8 +264,8 @@ st.markdown('Sistema automático de registro de ventas y compras para tu restaur
 sheets_service = obtener_servicio_sheets()
 facturas_ya_registradas = obtener_facturas_registradas(sheets_service)
 
-# --- SECCIÓN 1: DASHBOARD MENSUAL ---
-st.markdown('<div class="section-title">📊 Resumen del Periodo</div>', unsafe_allow_html=True)
+# --- SECCIÓN 1: DASHBOARD MENSUAL Y GESTIÓN ---
+st.markdown('<div class="section-title">📊 Resumen y Gestión del Periodo</div>', unsafe_allow_html=True)
 
 if sheets_service:
     df_historial = descargar_historial_sheets(sheets_service)
@@ -328,17 +327,63 @@ if sheets_service:
                 else: st.markdown(f'<div class="metric-card alert"><div class="metric-label">🏛️ RESULTADO</div><div class="metric-value" style="color: #D32F2F;">POR PAGAR</div><div style="font-size: 1.3em; color: #D32F2F; font-weight: 700; margin-top: 0.3em;">S/ {igv_neto_pagar:,.2f}</div></div>', unsafe_allow_html=True)
             
             st.divider()
+            
+            # --- TABLAS INTERACTIVAS PARA GESTIÓN DE ELIMINACIÓN ---
+            filas_a_eliminar = []
+            
             st.markdown('<p class="subtitle">Detalle de Ventas</p>', unsafe_allow_html=True)
             if not ventas_mes.empty:
+                ventas_edicion = ventas_mes.copy()
+                ventas_edicion.insert(0, '🗑️ Eliminar', False)
                 cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in ventas_mes.columns]
-                st.dataframe(ventas_mes[cols_ventas].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
-            else: st.info("📭 No hay ventas registradas en este periodo")
+                columnas_display_v = ['🗑️ Eliminar'] + cols_ventas
+                
+                # Mantenemos el índice original pero ordenamos visualmente por fecha
+                ventas_edicion = ventas_edicion.sort_values('Fecha', ascending=False)
+                
+                editado_v = st.data_editor(
+                    ventas_edicion[columnas_display_v],
+                    use_container_width=True,
+                    disabled=cols_ventas,  # Bloqueamos datos, solo dejamos el checkbox activo
+                    key="editor_ventas"
+                )
+                filas_a_eliminar.extend(editado_v[editado_v['🗑️ Eliminar']].index.tolist())
+            else: 
+                st.info("📭 No hay ventas registradas en este periodo")
 
             st.markdown('<p class="subtitle">Detalle de Compras</p>', unsafe_allow_html=True)
             if not compras_mes.empty:
+                compras_edicion = compras_mes.copy()
+                compras_edicion.insert(0, '🗑️ Eliminar', False)
                 cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in compras_mes.columns]
-                st.dataframe(compras_mes[cols_compras].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
-            else: st.info("📭 No hay compras registradas en este periodo")
+                columnas_display_c = ['🗑️ Eliminar'] + cols_compras
+                
+                compras_edicion = compras_edicion.sort_values('Fecha', ascending=False)
+                
+                editado_c = st.data_editor(
+                    compras_edicion[columnas_display_c],
+                    use_container_width=True,
+                    disabled=cols_compras,
+                    key="editor_compras"
+                )
+                filas_a_eliminar.extend(editado_c[editado_c['🗑️ Eliminar']].index.tolist())
+            else: 
+                st.info("📭 No hay compras registradas en este periodo")
+                
+            # --- BOTÓN DINÁMICO DE ELIMINACIÓN ---
+            if filas_a_eliminar:
+                st.warning(f"⚠️ Estás a punto de **ELIMINAR PERMANENTEMENTE** {len(filas_a_eliminar)} registro(s) de este mes.")
+                if st.button("🚨 Eliminar Registros Seleccionados", type="primary"):
+                    with st.spinner("Eliminando datos de Google Sheets y recalculando saldos..."):
+                        try:
+                            # Ajuste de índice para la API (+1 porque la API toma la cabecera como 0)
+                            indices_api = [idx + 1 for idx in filas_a_eliminar]
+                            eliminar_filas_sheets(sheets_service, indices_api)
+                            st.success("✅ Registros eliminados exitosamente. Actualizando Dashboard...")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al eliminar los registros: {e}")
+
         else:
             st.info("📭 No se encontraron fechas válidas en el historial registrado.")
     else:
@@ -423,37 +468,3 @@ if not df_todos.empty:
                             st.error(f"❌ Error al registrar en lotes: {e}")
                 else: st.error("No hay conexión a Google Sheets.")
         else: st.warning("⚠️ Has marcado todos los documentos como anulados o no hay comprobantes válidos para registrar.")
-
-st.divider()
-
-# --- SECCIÓN 3: GESTIONAR BASE DE DATOS (ELIMINAR REGISTROS) ---
-st.markdown('<div class="section-title">🗑️ Gestionar Base de Datos (Corregir Errores)</div>', unsafe_allow_html=True)
-st.markdown('Si subiste facturas anuladas o documentos por error a tu base de datos, búscalas aquí, selecciónalas y elimínalas para corregir tus saldos al instante.', unsafe_allow_html=True)
-
-if sheets_service and 'df_historial' in locals() and not df_historial.empty:
-    df_edicion = df_historial.copy()
-    df_edicion.insert(0, '🗑️ Eliminar', False)
-    df_edicion = df_edicion.sort_index(ascending=False)
-    
-    columnas_bloqueadas = [col for col in df_edicion.columns if col != '🗑️ Eliminar']
-    editado = st.data_editor(
-        df_edicion,
-        use_container_width=True, hide_index=False,
-        disabled=columnas_bloqueadas
-    )
-    
-    filas_seleccionadas = editado[editado['🗑️ Eliminar'] == True].index.tolist()
-    
-    if filas_seleccionadas:
-        st.warning(f"⚠️ Estás a punto de **ELIMINAR PERMANENTEMENTE** {len(filas_seleccionadas)} registro(s) de tu Google Sheets.")
-        if st.button("🚨 Eliminar Registros Seleccionados", type="primary"):
-            with st.spinner("Eliminando datos y recalculando saldos..."):
-                try:
-                    indices_api = [idx + 1 for idx in filas_seleccionadas]
-                    eliminar_filas_sheets(sheets_service, indices_api)
-                    st.success("✅ Registros eliminados exitosamente. Actualizando...")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error al eliminar los registros: {e}")
-else:
-    st.info("📭 No hay registros en la base de datos para gestionar.")
