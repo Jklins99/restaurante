@@ -22,65 +22,20 @@ st.set_page_config(
 # --- ESTILOS CSS PERSONALIZADOS ---
 st.markdown("""
     <style>
-    :root {
-        --primary: #2E7D32;
-        --accent: #D32F2F;
-        --neutral: #424242;
-        --light-bg: #F5F5F5;
-        --white: #FFFFFF;
-    }
-    .main-title {
-        font-size: 2.5em; font-weight: 700; color: #1B5E20;
-        margin-bottom: 0.2em; letter-spacing: -0.5px;
-    }
-    .section-title {
-        font-size: 1.3em; font-weight: 600; color: #2E7D32;
-        margin-top: 1.5em; margin-bottom: 1em;
-        border-left: 4px solid #2E7D32; padding-left: 12px;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #FFFFFF 0%, #F5F5F5 100%);
-        border-radius: 8px; padding: 1.5em;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        border-left: 4px solid #2E7D32;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .metric-card:hover {
-        transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-    }
-    .metric-label {
-        font-size: 0.85em; color: #666; font-weight: 500;
-        margin-bottom: 0.5em; text-transform: uppercase; letter-spacing: 0.5px;
-    }
+    :root { --primary: #2E7D32; --accent: #D32F2F; --neutral: #424242; --light-bg: #F5F5F5; --white: #FFFFFF; }
+    .main-title { font-size: 2.5em; font-weight: 700; color: #1B5E20; margin-bottom: 0.2em; letter-spacing: -0.5px; }
+    .section-title { font-size: 1.3em; font-weight: 600; color: #2E7D32; margin-top: 1.5em; margin-bottom: 1em; border-left: 4px solid #2E7D32; padding-left: 12px; }
+    .metric-card { background: linear-gradient(135deg, #FFFFFF 0%, #F5F5F5 100%); border-radius: 8px; padding: 1.5em; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid #2E7D32; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .metric-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+    .metric-label { font-size: 0.85em; color: #666; font-weight: 500; margin-bottom: 0.5em; text-transform: uppercase; letter-spacing: 0.5px; }
     .metric-value { font-size: 2em; font-weight: 700; color: #1B5E20; }
     .metric-card.alert { border-left-color: #D32F2F; }
     .metric-card.alert .metric-value { color: #D32F2F; }
-    .stButton > button {
-        background: linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%);
-        color: white; font-weight: 600; border: none;
-        border-radius: 6px; padding: 0.75em 2em;
-        transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(46, 125, 50, 0.3);
-    }
-    .stButton > button:hover {
-        transform: translateY(-1px); box-shadow: 0 4px 12px rgba(46, 125, 50, 0.4);
-    }
-    hr {
-        border: none; height: 1px;
-        background: linear-gradient(90deg, transparent, #DDD, transparent);
-        margin: 2em 0;
-    }
-    .info-box {
-        background: #E8F5E9; border-left: 4px solid #2E7D32;
-        padding: 1em; border-radius: 4px; margin: 1em 0;
-    }
-    .warning-box {
-        background: #FFEBEE; border-left: 4px solid #D32F2F;
-        padding: 1em; border-radius: 4px; margin: 1em 0;
-    }
-    .dataframe { font-size: 0.95em; }
-    .subtitle {
-        font-size: 1.1em; color: #555; margin: 1.5em 0 0.5em 0; font-weight: 500;
-    }
+    .stButton > button { background: linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%); color: white; font-weight: 600; border: none; border-radius: 6px; padding: 0.75em 2em; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(46, 125, 50, 0.3); }
+    .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(46, 125, 50, 0.4); }
+    hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, #DDD, transparent); margin: 2em 0; }
+    .warning-box { background: #FFEBEE; border-left: 4px solid #D32F2F; padding: 1em; border-radius: 4px; margin: 1em 0; }
+    .subtitle { font-size: 1.1em; color: #555; margin: 1.5em 0 0.5em 0; font-weight: 500; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -99,29 +54,24 @@ def obtener_facturas_registradas(sheets_service):
     registradas = set()
     if not sheets_service: return registradas
     try:
-        resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:K'
-        ).execute()
+        resultado = sheets_service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range='A:K').execute()
         filas = resultado.get('values', [])
         for fila in filas[1:]:
             if len(fila) >= 4:
                 llave = f"{fila[3]}-{fila[2]}"  # RUC-Comprobante
                 registradas.add(llave)
-    except Exception as e:
-        st.error(f"Error al obtener facturas registradas: {e}")
+    except Exception:
+        pass
     return registradas
 
 def descargar_historial_sheets(sheets_service):
     if not sheets_service: return pd.DataFrame()
     try:
-        resultado = sheets_service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID, range='A:K'
-        ).execute()
+        resultado = sheets_service.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range='A:K').execute()
         filas = resultado.get('values', [])
         if len(filas) > 1:
             cabeceras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Razón Social', 'Base Imponible', 'IGV', 'Total', 'Categoría', 'Documento', 'Tasa %']
             datos = filas[1:]
-            
             datos_normalizados = []
             for fila in datos:
                 while len(fila) < len(cabeceras):
@@ -129,42 +79,48 @@ def descargar_historial_sheets(sheets_service):
                 datos_normalizados.append(fila[:len(cabeceras)])
                 
             df = pd.DataFrame(datos_normalizados, columns=cabeceras)
-            
             for col in ['Base Imponible', 'IGV', 'Total']:
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-                
             return df
-    except Exception as e:
-        st.error(f"Error al descargar el historial: {e}")
+    except Exception:
+        pass
     return pd.DataFrame()
 
 def guardar_lote_en_sheets(sheets_service, df_validos):
     valores = []
     for _, datos in df_validos.iterrows():
-        # Mantenemos las 11 columnas originales para no romper la estructura de tu hoja
         fila = [
-            str(datos.get('Fecha', '')), 
-            str(datos.get('Tipo', '')), 
-            str(datos.get('Comprobante', '')), 
-            str(datos.get('RUC', '')), 
-            str(datos.get('Razón Social', '')), 
-            float(datos.get('Base Imponible', 0.0)), 
-            float(datos.get('IGV', 0.0)), 
-            float(datos.get('Total', 0.0)), 
-            str(datos.get('Categoría', '')), 
-            str(datos.get('Documento', 'N/A')), 
-            "N/A"  # Columna Tasa % vacía para no alterar la estructura
+            str(datos.get('Fecha', '')), str(datos.get('Tipo', '')), str(datos.get('Comprobante', '')), 
+            str(datos.get('RUC', '')), str(datos.get('Razón Social', '')), float(datos.get('Base Imponible', 0.0)), 
+            float(datos.get('IGV', 0.0)), float(datos.get('Total', 0.0)), str(datos.get('Categoría', '')), 
+            str(datos.get('Documento', 'N/A')), "N/A"  # Columna Tasa vacía para mantener estructura
         ]
         valores.append(fila)
-        
     if valores:
         cuerpo = {'values': valores}
         sheets_service.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID, range='A:K',
             valueInputOption='USER_ENTERED', body=cuerpo
         ).execute()
+
+def obtener_sheet_id(sheets_service, spreadsheet_id):
+    metadata = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    return metadata.get('sheets', '')[0].get("properties", {}).get("sheetId")
+
+def eliminar_filas_sheets(sheets_service, indices_a_eliminar):
+    sheet_id = obtener_sheet_id(sheets_service, SPREADSHEET_ID)
+    indices_a_eliminar.sort(reverse=True)
+    requests = []
+    for idx in indices_a_eliminar:
+        requests.append({
+            "deleteDimension": {
+                "range": { "sheetId": sheet_id, "dimension": "ROWS", "startIndex": idx, "endIndex": idx + 1 }
+            }
+        })
+    if requests:
+        sheets_service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
 
 # --- EXTRACCIÓN Y CLASIFICACIÓN (XML y PDF) ---
 def parse_sunat_xml(file_obj):
@@ -186,7 +142,6 @@ def parse_sunat_xml(file_obj):
         ruc_val = ruc.text if ruc is not None else 'N/A'
         serie_val = serie_numero.text if serie_numero is not None else 'N/A'
         
-        # --- CLASIFICACIÓN EXACTA SUNAT (XML) ---
         tipo_doc_node = root.find('.//cbc:InvoiceTypeCode', ns)
         if tipo_doc_node is not None:
             codigo = tipo_doc_node.text.strip()
@@ -195,16 +150,19 @@ def parse_sunat_xml(file_obj):
             elif codigo == '07': tipo_doc = "Nota de Crédito"
             else: tipo_doc = "Otro"
         else:
-            # Fallback seguro leyendo la serie (Soporta B001, EB01, F001, E001)
             serie_upper = serie_val.upper()
-            if serie_upper.startswith('B') or serie_upper.startswith('EB'): 
-                tipo_doc = "Boleta"
-            else: 
-                tipo_doc = "Factura"
+            if serie_upper.startswith('B') or serie_upper.startswith('EB'): tipo_doc = "Boleta"
+            elif serie_upper.startswith('F') or serie_upper.startswith('E'): tipo_doc = "Factura"
+            else: tipo_doc = "Otro"
         
         base_calculada = total - igv
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
+        if tipo_doc == "Nota de Crédito":
+            total = -abs(total)
+            igv = -abs(igv)
+            base_calculada = -abs(base_calculada)
+
         return {
             "Archivo": file_obj.name, "Tipo": "XML", "Documento": tipo_doc, "Fecha": fecha.text if fecha is not None else 'N/A',
             "Comprobante": serie_val, "RUC": ruc_val, "Razón Social": razon_social.text if razon_social is not None else 'N/A',
@@ -223,6 +181,14 @@ def procesar_factura_pdf(file_obj):
                 texto = page.extract_text()
                 if texto: texto_completo += texto + "\n"
         
+        texto_upper = texto_completo.upper()
+        if "ANULADO" in texto_upper or "ANULADA" in texto_upper:
+            return {
+                "Archivo": file_obj.name, "Tipo": "PDF", "Documento": "Anulado", "Fecha": "N/A",
+                "Comprobante": "N/A", "RUC": "N/A", "Razón Social": "Documento Anulado", 
+                "Base Imponible": 0.0, "IGV": 0.0, "Total": 0.0, "Categoría": "Descartado", "Estado": "🚫 Factura Anulada"
+            }
+
         fecha_str = None
         fecha_match = re.search(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b', texto_completo)
         if fecha_match:
@@ -234,23 +200,18 @@ def procesar_factura_pdf(file_obj):
                 pass
         
         ruc_match = re.search(r'\b(10|20)\d{9}\b', texto_completo)
-        
-        # --- NUEVO REGEX: Soporta series que empiezan con F, B, E (ej. E001, EB01, F001, B001) ---
         serie_match = re.search(r'\b([FBE][A-Z0-9]{3}-\d{1,8})\b', texto_completo, re.IGNORECASE)
         serie_val = serie_match.group(1).upper() if serie_match else "N/A"
         
-        # --- CLASIFICACIÓN EXACTA (PDF) ---
-        texto_upper = texto_completo.upper()
-        if "BOLETA DE VENTA" in texto_upper or "BOLETA ELECT" in texto_upper:
+        if "NOTA DE CRÉDITO" in texto_upper or "NOTA DE CREDITO" in texto_upper:
+            tipo_doc = "Nota de Crédito"
+        elif "BOLETA DE VENTA" in texto_upper or "BOLETA ELECT" in texto_upper:
             tipo_doc = "Boleta"
         elif "FACTURA ELECT" in texto_upper or "FACTURA DE VENTA" in texto_upper:
             tipo_doc = "Factura"
         else:
-            # Fallback a la serie (EB01 o B001 = Boleta, E001 o F001 = Factura)
-            if serie_val.startswith('B') or serie_val.startswith('EB'):
-                tipo_doc = "Boleta"
-            else:
-                tipo_doc = "Factura"
+            if serie_val.startswith('B') or serie_val.startswith('EB'): tipo_doc = "Boleta"
+            else: tipo_doc = "Factura"
         
         total_match = re.search(r'(?:TOTAL|Total|Importe Total).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo)
         igv_match = re.search(r'(?:IGV|I\.G\.V\.|Impuesto).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo, re.IGNORECASE)
@@ -260,19 +221,39 @@ def procesar_factura_pdf(file_obj):
         igv = float(igv_match.group(1).replace(',', '')) if igv_match else 0.0
         base_imponible = float(base_match.group(1).replace(',', '')) if base_match else (total - igv)
         
+        if tipo_doc == "Nota de Crédito":
+            total = -abs(total)
+            igv = -abs(igv)
+            base_imponible = -abs(base_imponible)
+
         ruc_val = ruc_match.group(0) if ruc_match else 'N/A'
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
+        razon_social = "Por verificar (PDF)"
+        # Regex actualizado para soportar el formato Señor(es) de SUNAT
+        rs_match = re.search(r'(?:Señor\(es\)|Señor(?:es)?|Cliente|Razón Social|Nombre)\s*:\s*([^\n]+)', texto_completo, re.IGNORECASE)
+        
+        if rs_match:
+            razon_temp = rs_match.group(1).strip()
+            if len(razon_temp) > 3 and not re.search(r'\b(RUC|DNI)\b', razon_temp, re.IGNORECASE):
+                razon_social = razon_temp
+        
+        if razon_social == "Por verificar (PDF)":
+            lineas = [linea.strip() for linea in texto_completo.split('\n') if linea.strip()]
+            for linea in lineas[:5]:
+                if len(linea) > 4 and not re.search(r'(FACTURA|BOLETA|RUC|FECHA|\d{11})', linea, re.IGNORECASE):
+                    razon_social = linea
+                    break
+
         estado_doc = "OK"
-        if total <= 0 or not igv_match or not fecha_str:
+        if total == 0 or not igv_match or not fecha_str:
             estado_doc = "Revisar Manualmente"
             
         return {
             "Archivo": file_obj.name, "Tipo": "PDF", "Documento": tipo_doc, "Fecha": fecha_str if fecha_str else 'N/A',
-            "Comprobante": serie_val, "RUC": ruc_val,
-            "Razón Social": "Por verificar (PDF)", "Base Imponible": round(base_imponible, 2),
-            "IGV": round(igv, 2), "Total": round(total, 2), "Categoría": categoria, 
-            "Estado": estado_doc
+            "Comprobante": serie_val, "RUC": ruc_val, "Razón Social": razon_social, 
+            "Base Imponible": round(base_imponible, 2), "IGV": round(igv, 2), "Total": round(total, 2), 
+            "Categoría": categoria, "Estado": estado_doc
         }
     except Exception:
         return {"Archivo": file_obj.name, "Tipo": "PDF", "Categoría": "Desconocido", "Estado": "Error de lectura"}
@@ -293,7 +274,6 @@ if sheets_service:
     if not df_historial.empty:
         df_historial['Fecha'] = pd.to_datetime(df_historial['Fecha'], errors='coerce')
         df_historial['Mes'] = df_historial['Fecha'].dt.to_period('M').astype(str)
-        
         meses_disponibles = sorted(df_historial['Mes'].dropna().unique(), reverse=True)
         
         if meses_disponibles:
@@ -321,65 +301,44 @@ if sheets_service:
             saldo_anterior = 0.0
             if mes_anterior_str in df_historial['Mes'].values:
                 df_mes_anterior = df_historial[df_historial['Mes'] == mes_anterior_str]
-                ventas_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Venta']
-                compras_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Compra']
-                
-                igv_col_ant = 'IGV' if 'IGV' in df_mes_anterior.columns else 'IGV (18%)'
-                igv_v_ant = ventas_ant[igv_col_ant].sum() if not ventas_ant.empty else 0.0
-                igv_c_ant = compras_ant[igv_col_ant].sum() if not compras_ant.empty else 0.0
-                diferencia_anterior = igv_v_ant - igv_c_ant
-                saldo_anterior = abs(min(0.0, diferencia_anterior))
+                igv_v_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Venta'][igv_col].sum() if not df_mes_anterior[df_mes_anterior['Categoría'] == 'Venta'].empty else 0.0
+                igv_c_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Compra'][igv_col].sum() if not df_mes_anterior[df_mes_anterior['Categoría'] == 'Compra'].empty else 0.0
+                saldo_anterior = abs(min(0.0, igv_v_ant - igv_c_ant))
             
             igv_neto_pagar = max(0.0, diferencia_igv - saldo_anterior)
             saldo_a_favor = max(0.0, saldo_anterior - diferencia_igv)
             
-            # Tarjetas de Métricas
             cols = st.columns(4, gap="medium")
-            with cols[0]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">💰 Ingresos</div><div class="metric-value">S/ {total_v:,.2f}</div></div>', unsafe_allow_html=True)
-            with cols[1]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">📦 Egresos</div><div class="metric-value">S/ {total_c:,.2f}</div></div>', unsafe_allow_html=True)
-            with cols[2]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">📈 IGV Neto del Mes</div><div class="metric-value">{"+" if diferencia_igv >= 0 else "-"} S/ {abs(diferencia_igv):,.2f}</div><div style="font-size: 0.75em; color: #999; margin-top: 0.5em;">Cobrado: S/ {igv_v:,.2f} | Crédito: S/ {igv_c:,.2f}</div></div>', unsafe_allow_html=True)
+            with cols[0]: st.markdown(f'<div class="metric-card"><div class="metric-label">💰 Ingresos</div><div class="metric-value">S/ {total_v:,.2f}</div></div>', unsafe_allow_html=True)
+            with cols[1]: st.markdown(f'<div class="metric-card"><div class="metric-label">📦 Egresos</div><div class="metric-value">S/ {total_c:,.2f}</div></div>', unsafe_allow_html=True)
+            with cols[2]: st.markdown(f'<div class="metric-card"><div class="metric-label">📈 IGV Neto del Mes</div><div class="metric-value">{"+" if diferencia_igv >= 0 else "-"} S/ {abs(diferencia_igv):,.2f}</div><div style="font-size: 0.75em; color: #999; margin-top: 0.5em;">Cobrado: S/ {igv_v:,.2f} | Crédito: S/ {igv_c:,.2f}</div></div>', unsafe_allow_html=True)
             with cols[3]:
-                if saldo_anterior > 0:
-                    st.markdown(f'<div class="metric-card" style="border-left-color: #FF6F00;"><div class="metric-label">↙️ Saldo Anterior</div><div class="metric-value" style="color: #FF6F00; font-size: 1.5em;">S/ {saldo_anterior:,.2f}</div></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="metric-card"><div class="metric-label">✓ Sin Saldo Anterior</div><div class="metric-value" style="color: #666; font-size: 1.5em;">-</div></div>', unsafe_allow_html=True)
+                if saldo_anterior > 0: st.markdown(f'<div class="metric-card" style="border-left-color: #FF6F00;"><div class="metric-label">↙️ Saldo Anterior</div><div class="metric-value" style="color: #FF6F00; font-size: 1.5em;">S/ {saldo_anterior:,.2f}</div></div>', unsafe_allow_html=True)
+                else: st.markdown('<div class="metric-card"><div class="metric-label">✓ Sin Saldo Anterior</div><div class="metric-value" style="color: #666; font-size: 1.5em;">-</div></div>', unsafe_allow_html=True)
             
             st.divider()
-            
             st.markdown('<p class="subtitle">📋 Resumen Final (Considerando Arrastre)</p>', unsafe_allow_html=True)
             cols_resumen = st.columns(3, gap="medium")
-            with cols_resumen[0]:
-                st.markdown(f'<div class="metric-card"><div class="metric-label">IGV Neto del Mes</div><div class="metric-value" style="color: #1565C0;">{"+" if diferencia_igv >= 0 else "-"} S/ {abs(diferencia_igv):,.2f}</div></div>', unsafe_allow_html=True)
+            with cols_resumen[0]: st.markdown(f'<div class="metric-card"><div class="metric-label">IGV Neto del Mes</div><div class="metric-value" style="color: #1565C0;">{"+" if diferencia_igv >= 0 else "-"} S/ {abs(diferencia_igv):,.2f}</div></div>', unsafe_allow_html=True)
             with cols_resumen[1]:
-                if saldo_anterior > 0:
-                    st.markdown(f'<div class="metric-card" style="border-left-color: #FF6F00;"><div class="metric-label">Menos Saldo Anterior</div><div class="metric-value" style="color: #FF6F00;">- S/ {saldo_anterior:,.2f}</div></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="metric-card"><div class="metric-label">Menos Saldo Anterior</div><div class="metric-value" style="color: #999;">-</div></div>', unsafe_allow_html=True)
+                if saldo_anterior > 0: st.markdown(f'<div class="metric-card" style="border-left-color: #FF6F00;"><div class="metric-label">Menos Saldo Anterior</div><div class="metric-value" style="color: #FF6F00;">- S/ {saldo_anterior:,.2f}</div></div>', unsafe_allow_html=True)
+                else: st.markdown('<div class="metric-card"><div class="metric-label">Menos Saldo Anterior</div><div class="metric-value" style="color: #999;">-</div></div>', unsafe_allow_html=True)
             with cols_resumen[2]:
-                if saldo_a_favor > 0:
-                    st.markdown(f'<div class="metric-card"><div class="metric-label">💚 RESULTADO</div><div class="metric-value" style="color: #2E7D32;">SALDO A FAVOR</div><div style="font-size: 1.3em; color: #2E7D32; font-weight: 700; margin-top: 0.3em;">S/ {saldo_a_favor:,.2f}</div></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="metric-card alert"><div class="metric-label">🏛️ RESULTADO</div><div class="metric-value" style="color: #D32F2F;">POR PAGAR</div><div style="font-size: 1.3em; color: #D32F2F; font-weight: 700; margin-top: 0.3em;">S/ {igv_neto_pagar:,.2f}</div></div>', unsafe_allow_html=True)
+                if saldo_a_favor > 0: st.markdown(f'<div class="metric-card"><div class="metric-label">💚 RESULTADO</div><div class="metric-value" style="color: #2E7D32;">SALDO A FAVOR</div><div style="font-size: 1.3em; color: #2E7D32; font-weight: 700; margin-top: 0.3em;">S/ {saldo_a_favor:,.2f}</div></div>', unsafe_allow_html=True)
+                else: st.markdown(f'<div class="metric-card alert"><div class="metric-label">🏛️ RESULTADO</div><div class="metric-value" style="color: #D32F2F;">POR PAGAR</div><div style="font-size: 1.3em; color: #D32F2F; font-weight: 700; margin-top: 0.3em;">S/ {igv_neto_pagar:,.2f}</div></div>', unsafe_allow_html=True)
             
             st.divider()
-            
-            # Tablas de datos sin la columna de Tasa
             st.markdown('<p class="subtitle">Detalle de Ventas</p>', unsafe_allow_html=True)
             if not ventas_mes.empty:
-                cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'RUC', 'Total', igv_col] if col in ventas_mes.columns]
+                cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in ventas_mes.columns]
                 st.dataframe(ventas_mes[cols_ventas].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
-            else:
-                st.info("📭 No hay ventas registradas en este periodo")
+            else: st.info("📭 No hay ventas registradas en este periodo")
 
             st.markdown('<p class="subtitle">Detalle de Compras</p>', unsafe_allow_html=True)
             if not compras_mes.empty:
-                cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'RUC', 'Total', igv_col] if col in compras_mes.columns]
+                cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in compras_mes.columns]
                 st.dataframe(compras_mes[cols_compras].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
-            else:
-                st.info("📭 No hay compras registradas en este periodo")
+            else: st.info("📭 No hay compras registradas en este periodo")
         else:
             st.info("📭 No se encontraron fechas válidas en el historial registrado.")
     else:
@@ -387,19 +346,16 @@ if sheets_service:
 
 st.divider()
 
-# --- SECCIÓN 2: CARGA RÁPIDA DE COMPROBANTES CON CACHÉ DE SESIÓN ---
+# --- SECCIÓN 2: CARGA RÁPIDA DE COMPROBANTES CON CACHÉ ---
 st.markdown('<div class="section-title">📤 Registrar Nuevos Comprobantes</div>', unsafe_allow_html=True)
 
-if 'df_procesado' not in st.session_state:
-    st.session_state.df_procesado = pd.DataFrame()
-if 'archivos_nombres' not in st.session_state:
-    st.session_state.archivos_nombres = []
+if 'df_procesado' not in st.session_state: st.session_state.df_procesado = pd.DataFrame()
+if 'archivos_nombres' not in st.session_state: st.session_state.archivos_nombres = []
 
 archivos_subidos = st.file_uploader("Selecciona tus archivos", type=['xml', 'pdf'], accept_multiple_files=True, label_visibility="collapsed")
 
 if archivos_subidos:
     nombres_actuales = [f.name for f in archivos_subidos]
-    
     if nombres_actuales != st.session_state.archivos_nombres:
         datos_procesados = []
         with st.spinner("Procesando y extrayendo datos (solo una vez por lote)..."):
@@ -407,20 +363,15 @@ if archivos_subidos:
                 datos = parse_sunat_xml(f) if f.name.lower().endswith('.xml') else procesar_factura_pdf(f)
                 llave_actual = f"{datos.get('RUC')}-{datos.get('Comprobante')}"
                 
-                try:
-                    fecha_doc = pd.to_datetime(datos.get('Fecha'))
-                    datos['Mes Facturación'] = fecha_doc.strftime('%Y-%m')
-                except:
-                    datos['Mes Facturación'] = 'N/A'
+                try: datos['Mes Facturación'] = pd.to_datetime(datos.get('Fecha')).strftime('%Y-%m')
+                except: datos['Mes Facturación'] = 'N/A'
                 
                 if llave_actual in facturas_ya_registradas and datos.get('RUC') != 'N/A':
                     datos['Estado'] = '⚠️ Duplicado'
-                    
                 datos_procesados.append(datos)
 
             st.session_state.df_procesado = pd.DataFrame(datos_procesados)
             st.session_state.archivos_nombres = nombres_actuales
-
     df_todos = st.session_state.df_procesado
 else:
     st.session_state.df_procesado = pd.DataFrame()
@@ -429,33 +380,22 @@ else:
 
 if not df_todos.empty:
     st.divider()
-    
-    # Filtramos solo los que pasaron la lectura inicial
     df_validos = df_todos[df_todos['Estado'] == 'OK'].copy()
     
     if not df_validos.empty:
-        # 1. Agregamos una columna de Checkbox interactiva
         df_validos.insert(0, '🚫 Anulada / Descartar', False)
-        
         st.markdown('<p class="subtitle">Vista Previa del Lote (Marca la casilla si el documento fue anulado)</p>', unsafe_allow_html=True)
         
-        # --- AQUÍ SE AGREGÓ LA RAZÓN SOCIAL ---
         columnas_display = ['🚫 Anulada / Descartar', 'Archivo', 'Mes Facturación', 'Documento', 'Razón Social', 'Categoría', 'Comprobante', 'Total', 'IGV']
-        
-        # 2. Mostramos el editor interactivo
         df_editado = st.data_editor(
             df_validos[columnas_display],
-            use_container_width=True,
-            hide_index=True,
-            disabled=columnas_display[1:] # Bloquea todas las columnas excepto la primera (checkbox)
+            use_container_width=True, hide_index=True,
+            disabled=columnas_display[1:]
         )
         
-        # 3. Filtramos los datos basándonos en lo que marcó el usuario
         df_final_a_guardar = df_validos[~df_editado['🚫 Anulada / Descartar']].copy()
-        
         st.divider()
         
-        # 4. Recalculamos el resumen del lote SOLO con los documentos no anulados
         igv_col_lote = 'IGV' if 'IGV' in df_final_a_guardar.columns else 'IGV (18%)'
         total_igv_ventas_lote = df_final_a_guardar[df_final_a_guardar['Categoría'] == 'Venta'][igv_col_lote].sum() if not df_final_a_guardar.empty else 0.0
         total_igv_compras_lote = df_final_a_guardar[df_final_a_guardar['Categoría'] == 'Compra'][igv_col_lote].sum() if not df_final_a_guardar.empty else 0.0
@@ -465,14 +405,11 @@ if not df_todos.empty:
         with cols_lote[1]: st.metric("📦 IGV Compras (A Registrar)", f"S/ {total_igv_compras_lote:,.2f}")
         with cols_lote[2]: st.metric("✅ Total Válidos", len(df_final_a_guardar))
         
-        # Advertencias
         errores = df_todos[df_todos['Estado'].str.contains('Error|Revisar|Duplicado', na=False)]
         if not errores.empty:
             st.markdown(f'<div class="warning-box"><strong>⚠️ Atención:</strong> {len(errores)} archivo(s) requiere(n) revisión manual por errores o duplicados.</div>', unsafe_allow_html=True)
         
         st.divider()
-        
-        # Botón de Registro
         if not df_final_a_guardar.empty:
             if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
                 if sheets_service:
@@ -480,12 +417,43 @@ if not df_todos.empty:
                         try:
                             guardar_lote_en_sheets(sheets_service, df_final_a_guardar)
                             st.success(f"✅ ¡Éxito! Se registraron {len(df_final_a_guardar)} comprobante(s). Recarga la página para ver el dashboard actualizado.")
-                            # Limpiar caché tras guardado exitoso
                             st.session_state.df_procesado = pd.DataFrame()
                             st.session_state.archivos_nombres = []
                         except Exception as e:
                             st.error(f"❌ Error al registrar en lotes: {e}")
-                else:
-                    st.error("No hay conexión a Google Sheets.")
-        else:
-            st.warning("⚠️ Has marcado todos los documentos como anulados o no hay comprobantes válidos para registrar.")
+                else: st.error("No hay conexión a Google Sheets.")
+        else: st.warning("⚠️ Has marcado todos los documentos como anulados o no hay comprobantes válidos para registrar.")
+
+st.divider()
+
+# --- SECCIÓN 3: GESTIONAR BASE DE DATOS (ELIMINAR REGISTROS) ---
+st.markdown('<div class="section-title">🗑️ Gestionar Base de Datos (Corregir Errores)</div>', unsafe_allow_html=True)
+st.markdown('Si subiste facturas anuladas o documentos por error a tu base de datos, búscalas aquí, selecciónalas y elimínalas para corregir tus saldos al instante.', unsafe_allow_html=True)
+
+if sheets_service and 'df_historial' in locals() and not df_historial.empty:
+    df_edicion = df_historial.copy()
+    df_edicion.insert(0, '🗑️ Eliminar', False)
+    df_edicion = df_edicion.sort_index(ascending=False)
+    
+    columnas_bloqueadas = [col for col in df_edicion.columns if col != '🗑️ Eliminar']
+    editado = st.data_editor(
+        df_edicion,
+        use_container_width=True, hide_index=False,
+        disabled=columnas_bloqueadas
+    )
+    
+    filas_seleccionadas = editado[editado['🗑️ Eliminar'] == True].index.tolist()
+    
+    if filas_seleccionadas:
+        st.warning(f"⚠️ Estás a punto de **ELIMINAR PERMANENTEMENTE** {len(filas_seleccionadas)} registro(s) de tu Google Sheets.")
+        if st.button("🚨 Eliminar Registros Seleccionados", type="primary"):
+            with st.spinner("Eliminando datos y recalculando saldos..."):
+                try:
+                    indices_api = [idx + 1 for idx in filas_seleccionadas]
+                    eliminar_filas_sheets(sheets_service, indices_api)
+                    st.success("✅ Registros eliminados exitosamente. Actualizando...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al eliminar los registros: {e}")
+else:
+    st.info("📭 No hay registros en la base de datos para gestionar.")
