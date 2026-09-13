@@ -529,6 +529,26 @@ if archivos_subidos:
         
         st.divider()
         
+        # --- RESUMEN POR MES ---
+        if len(meses_detectados) > 1:
+            st.markdown('<p class="subtitle">📊 Resumen por Mes</p>', unsafe_allow_html=True)
+            
+            for mes in meses_detectados:
+                df_mes_actual = df_todos[df_todos['Mes Facturación'] == mes]
+                df_mes_validos = df_mes_actual[df_mes_actual['Estado'] == 'OK']
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(f"Documentos ({mes})", len(df_mes_validos))
+                with col2:
+                    igv_mes = df_mes_validos['IGV (18%)'].sum() if 'IGV (18%)' in df_mes_validos.columns else 0.0
+                    st.metric(f"IGV Neto ({mes})", f"S/ {igv_mes:,.2f}")
+                with col3:
+                    total_mes = df_mes_validos['Total'].sum() if 'Total' in df_mes_validos.columns else 0.0
+                    st.metric(f"Total ({mes})", f"S/ {total_mes:,.2f}")
+        
+        st.divider()
+        
         # --- BOTÓN DE REGISTRO ---
         if not df_validos.empty:
             col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
@@ -542,7 +562,8 @@ if archivos_subidos:
                                 guardar_en_sheets(sheets_service, fila, fila['Categoría'])
                                 exitos += 1
                             
-                            st.success(f"✅ ¡Éxito! Se registraron {exitos} comprobante(s). Recarga arriba para ver los saldos actualizados.")
+                            meses_registrados = ", ".join(sorted(df_validos[df_validos['Estado'] == 'OK']['Mes Facturación'].unique()))
+                            st.success(f"✅ ¡Éxito! Se registraron {exitos} comprobante(s) en {meses_registrados}. Recarga arriba para ver los saldos actualizados.")
                         except Exception as e:
                             st.error(f"❌ Error al registrar: {e}")
         else:
