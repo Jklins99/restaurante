@@ -430,45 +430,62 @@ else:
 if not df_todos.empty:
     st.divider()
     
-    df_validos = df_todos[df_todos['Estado'] == 'OK']
+    # Filtramos solo los que pasaron la lectura inicial
+    df_validos = df_todos[df_todos['Estado'] == 'OK'].copy()
     
-    # Resumen del lote
-    igv_col_lote = 'IGV' if 'IGV' in df_validos.columns else 'IGV (18%)'
-    total_igv_ventas_lote = df_validos[df_validos['Categoría'] == 'Venta'][igv_col_lote].sum() if not df_validos.empty else 0.0
-    total_igv_compras_lote = df_validos[df_validos['Categoría'] == 'Compra'][igv_col_lote].sum() if not df_validos.empty else 0.0
-    
-    cols_lote = st.columns(3, gap="medium")
-    with cols_lote[0]: st.metric("📈 IGV Ventas Extraído", f"S/ {total_igv_ventas_lote:,.2f}")
-    with cols_lote[1]: st.metric("📦 IGV Compras Extraído", f"S/ {total_igv_compras_lote:,.2f}")
-    with cols_lote[2]: st.metric("✅ Total Válidos", len(df_validos))
-    
-    # Vista previa sin Tasa %
-    st.markdown('<p class="subtitle">Vista Previa del Lote</p>', unsafe_allow_html=True)
-    columnas_display = ['Archivo', 'Mes Facturación', 'Documento', 'Categoría', 'Comprobante', 'Total', 'IGV', 'Estado']
-    df_display = df_todos[[col for col in columnas_display if col in df_todos.columns]].copy()
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
-    
-    # Advertencias
-    errores = df_todos[df_todos['Estado'].str.contains('Error|Revisar|Duplicado', na=False)]
-    if not errores.empty:
-        st.markdown(f'<div class="warning-box"><strong>⚠️ Atención:</strong> {len(errores)} archivo(s) requiere(n) revisión (sin fecha, duplicado o falta de IGV). No se registrarán.</div>', unsafe_allow_html=True)
-    
-    st.divider()
-    
-    # Botón de Registro (Batch)
     if not df_validos.empty:
-        if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
-            if sheets_service:
-                with st.spinner("💾 Guardando todos los registros a la vez..."):
-                    try:
-                        guardar_lote_en_sheets(sheets_service, df_validos)
-                        st.success(f"✅ ¡Éxito! Se registraron {len(df_validos)} comprobante(s). Recarga la página para ver el dashboard actualizado.")
-                        # Limpiar caché tras guardado exitoso
-                        st.session_state.df_procesado = pd.DataFrame()
-                        st.session_state.archivos_nombres = []
-                    except Exception as e:
-                        st.error(f"❌ Error al registrar en lotes: {e}")
-            else:
-                st.error("No hay conexión a Google Sheets.")
-    else:
-        st.warning("⚠️ No hay comprobantes válidos ('OK') para registrar. Revisa la tabla de vista previa.")
+        # 1. Agregamos una columna de Checkbox interactiva
+        df_validos.insert(0, '🚫 Anulada / Descartar', False)
+        
+        st.markdown('<p class="subtitle">Vista Previa del Lote (Marca la casilla si el documento fue anulado)</p>', unsafe_allow_html=True)
+        
+        # --- AQUÍ SE AGREGÓ LA RAZÓN SOCIAL ---
+        columnas_display = ['🚫 Anulada / Descartar', 'Archivo', 'Mes Facturación', 'Documento', 'Razón Social', 'Categoría', 'Comprobante', 'Total', 'IGV']
+        
+        # 2. Mostramos el editor interactivo
+        df_editado = st.data_editor(
+            df_validos[columnas_display],
+            use_container_width=True,
+            hide_index=True,
+            disabled=columnas_display[1:] # Bloquea todas las columnas excepto la primera (checkbox)
+        )
+        
+        # 3. Filtramos los datos basándonos en lo que marcó el usuario
+        df_final_a_guardar = df_validos[~df_editado['🚫 Anulada / Descartar']].copy()
+        
+        st.divider()
+        
+        # 4. Recalculamos el resumen del lote SOLO con los documentos no anulados
+        igv_col_lote = 'IGV' if 'IGV' in df_final_a_guardar.columns else 'IGV (18%)'
+        total_igv_ventas_lote = df_final_a_guardar[df_final_a_guardar['Categoría'] == 'Venta'][igv_col_lote].sum() if not df_final_a_guardar.empty else 0.0
+        total_igv_compras_lote = df_final_a_guardar[df_final_a_guardar['Categoría'] == 'Compra'][igv_col_lote].sum() if not df_final_a_guardar.empty else 0.0
+        
+        cols_lote = st.columns(3, gap="medium")
+        with cols_lote[0]: st.metric("📈 IGV Ventas (A Registrar)", f"S/ {total_igv_ventas_lote:,.2f}")
+        with cols_lote[1]: st.metric("📦 IGV Compras (A Registrar)", f"S/ {total_igv_compras_lote:,.2f}")
+        with cols_lote[2]: st.metric("✅ Total Válidos", len(df_final_a_guardar))
+        
+        # Advertencias
+        errores = df_todos[df_todos['Estado'].str.contains('Error|Revisar|Duplicado', na=False)]
+        if not errores.empty:
+            st.markdown(f'<div class="warning-box"><strong>⚠️ Atención:</strong> {len(errores)} archivo(s) requiere(n) revisión manual por errores o duplicados.</div>', unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Botón de Registro
+        if not df_final_a_guardar.empty:
+            if st.button("🚀 Registrar Lote en Google Sheets", type="primary"):
+                if sheets_service:
+                    with st.spinner("💾 Guardando todos los registros a la vez..."):
+                        try:
+                            guardar_lote_en_sheets(sheets_service, df_final_a_guardar)
+                            st.success(f"✅ ¡Éxito! Se registraron {len(df_final_a_guardar)} comprobante(s). Recarga la página para ver el dashboard actualizado.")
+                            # Limpiar caché tras guardado exitoso
+                            st.session_state.df_procesado = pd.DataFrame()
+                            st.session_state.archivos_nombres = []
+                        except Exception as e:
+                            st.error(f"❌ Error al registrar en lotes: {e}")
+                else:
+                    st.error("No hay conexión a Google Sheets.")
+        else:
+            st.warning("⚠️ Has marcado todos los documentos como anulados o no hay comprobantes válidos para registrar.")
