@@ -413,7 +413,9 @@ st.divider()
 
 # --- SECCIÓN 2: CARGA RÁPIDA DE COMPROBANTES ---
 st.markdown('<div class="section-title">📤 Registrar Nuevos Comprobantes</div>', unsafe_allow_html=True)
-st.markdown('Arrastra tus archivos XML o PDF. El sistema detectará automáticamente si es venta o compra.', unsafe_allow_html=True)
+st.markdown('Carga tus archivos XML o PDF. El sistema detectará automáticamente la fecha de cada documento.', unsafe_allow_html=True)
+
+st.divider()
 
 archivos_subidos = st.file_uploader(
     "Selecciona tus archivos",
@@ -429,6 +431,14 @@ if archivos_subidos:
         datos = parse_sunat_xml(f) if f.name.lower().endswith('.xml') else procesar_factura_pdf(f)
         llave_actual = f"{datos.get('RUC')}-{datos.get('Comprobante')}"
         
+        # Detectar automáticamente el mes del documento
+        try:
+            fecha_doc = pd.to_datetime(datos.get('Fecha'))
+            mes_doc = fecha_doc.strftime('%Y-%m')
+            datos['Mes Facturación'] = mes_doc
+        except:
+            datos['Mes Facturación'] = 'N/A'
+        
         if llave_actual in facturas_ya_registradas and datos.get('RUC') != 'N/A':
             datos['Estado'] = '⚠️ Duplicado'
             
@@ -438,6 +448,12 @@ if archivos_subidos:
 
     if not df_todos.empty:
         st.divider()
+        
+        # Detectar meses únicos en los documentos cargados
+        meses_detectados = sorted(df_todos[df_todos['Mes Facturación'] != 'N/A']['Mes Facturación'].unique(), reverse=True)
+        
+        if meses_detectados:
+            st.markdown(f'<p class="subtitle">📅 Meses Detectados: {", ".join(meses_detectados)}</p>', unsafe_allow_html=True)
         
         df_validos = df_todos[df_todos['Estado'] == 'OK']
         
@@ -478,8 +494,10 @@ if archivos_subidos:
         
         # --- PREVIEW DE DATOS ---
         st.markdown('<p class="subtitle">Vista Previa del Lote</p>', unsafe_allow_html=True)
+        
+        # Mostrar tabla con mes detectado
         st.dataframe(
-            df_todos[['Archivo', 'Tipo', 'Categoría', 'RUC', 'Total', 'IGV (18%)', 'Estado']],
+            df_todos[['Archivo', 'Mes Facturación', 'Tipo', 'Categoría', 'RUC', 'Comprobante', 'Total', 'IGV (18%)', 'Estado']],
             use_container_width=True,
             hide_index=True
         )
@@ -489,7 +507,7 @@ if archivos_subidos:
         if not duplicados.empty:
             st.markdown(f"""
                 <div class="warning-box">
-                <strong>⚠️ Atención:</strong> Se detectaron {len(duplicados)} comprobante(s) duplicado(s) que ya están registrados. No se incluirán en el registro.
+                <strong>⚠️ Duplicados Detectados:</strong> {len(duplicados)} comprobante(s) ya están registrados en el sistema. No se incluirán en el registro.
                 </div>
                 """, unsafe_allow_html=True)
         
@@ -498,6 +516,14 @@ if archivos_subidos:
             st.markdown(f"""
                 <div class="warning-box">
                 <strong>⚠️ Revisión Manual:</strong> {len(errores)} archivo(s) necesita(n) revisión. Verifica los datos antes de registrar.
+                </div>
+                """, unsafe_allow_html=True)
+        
+        sin_fecha = df_todos[df_todos['Mes Facturación'] == 'N/A']
+        if not sin_fecha.empty:
+            st.markdown(f"""
+                <div class="warning-box">
+                <strong>⚠️ Fecha No Detectada:</strong> {len(sin_fecha)} archivo(s) no tiene fecha válida. Verifica que sean documentos válidos.
                 </div>
                 """, unsafe_allow_html=True)
         
