@@ -264,7 +264,7 @@ st.markdown('Sistema automático de registro de ventas y compras para tu restaur
 sheets_service = obtener_servicio_sheets()
 facturas_ya_registradas = obtener_facturas_registradas(sheets_service)
 
-# --- SECCIÓN 1: DASHBOARD MENSUAL Y GESTIÓN ---
+# --- SECCIÓN 1: DASHBOARD MENSUAL ---
 st.markdown('<div class="section-title">📊 Resumen y Gestión del Periodo</div>', unsafe_allow_html=True)
 
 if sheets_service:
@@ -328,56 +328,43 @@ if sheets_service:
             
             st.divider()
             
-            # --- TABLAS INTERACTIVAS PARA GESTIÓN DE ELIMINACIÓN ---
-            filas_a_eliminar = []
-            
+            # --- TABLAS DE VISUALIZACIÓN LECTURA ---
             st.markdown('<p class="subtitle">Detalle de Ventas</p>', unsafe_allow_html=True)
             if not ventas_mes.empty:
-                ventas_edicion = ventas_mes.copy()
-                ventas_edicion.insert(0, '🗑️ Eliminar', False)
                 cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in ventas_mes.columns]
-                columnas_display_v = ['🗑️ Eliminar'] + cols_ventas
-                
-                # Mantenemos el índice original pero ordenamos visualmente por fecha
-                ventas_edicion = ventas_edicion.sort_values('Fecha', ascending=False)
-                
-                editado_v = st.data_editor(
-                    ventas_edicion[columnas_display_v],
-                    use_container_width=True,
-                    disabled=cols_ventas,  # Bloqueamos datos, solo dejamos el checkbox activo
-                    key="editor_ventas"
-                )
-                filas_a_eliminar.extend(editado_v[editado_v['🗑️ Eliminar']].index.tolist())
+                st.dataframe(ventas_mes[cols_ventas].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
             else: 
                 st.info("📭 No hay ventas registradas en este periodo")
 
             st.markdown('<p class="subtitle">Detalle de Compras</p>', unsafe_allow_html=True)
             if not compras_mes.empty:
-                compras_edicion = compras_mes.copy()
-                compras_edicion.insert(0, '🗑️ Eliminar', False)
                 cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'Razón Social', 'Total', igv_col] if col in compras_mes.columns]
-                columnas_display_c = ['🗑️ Eliminar'] + cols_compras
-                
-                compras_edicion = compras_edicion.sort_values('Fecha', ascending=False)
-                
-                editado_c = st.data_editor(
-                    compras_edicion[columnas_display_c],
-                    use_container_width=True,
-                    disabled=cols_compras,
-                    key="editor_compras"
-                )
-                filas_a_eliminar.extend(editado_c[editado_c['🗑️ Eliminar']].index.tolist())
+                st.dataframe(compras_mes[cols_compras].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
             else: 
                 st.info("📭 No hay compras registradas en este periodo")
+
+            # --- BOTÓN EXTERNO DE ELIMINACIÓN ---
+            st.divider()
+            st.markdown('<div class="warning-box"><strong>🗑️ Zona de Eliminación (Solo Correcciones):</strong> Selecciona abajo los comprobantes que deseas borrar permanentemente de este mes.</div>', unsafe_allow_html=True)
+            
+            # Crear diccionario para mapear la etiqueta legible con el índice real de la tabla
+            opciones_eliminar = {}
+            for idx, row in df_mes.iterrows():
+                etiqueta = f"{row.get('Categoría', '')} | {row.get('Fecha', '')} | {row.get('Comprobante', '')} - {row.get('Razón Social', 'N/A')} (Total: S/ {row.get('Total', 0.0)})"
+                opciones_eliminar[etiqueta] = idx
                 
-            # --- BOTÓN DINÁMICO DE ELIMINACIÓN ---
-            if filas_a_eliminar:
-                st.warning(f"⚠️ Estás a punto de **ELIMINAR PERMANENTEMENTE** {len(filas_a_eliminar)} registro(s) de este mes.")
-                if st.button("🚨 Eliminar Registros Seleccionados", type="primary"):
-                    with st.spinner("Eliminando datos de Google Sheets y recalculando saldos..."):
+            seleccionados = st.multiselect(
+                "Busca y selecciona uno o varios comprobantes:",
+                options=list(opciones_eliminar.keys()),
+                help="Puedes buscar escribiendo el número de comprobante o el nombre de la empresa"
+            )
+            
+            if seleccionados:
+                if st.button("🚨 Eliminar Documentos Seleccionados", type="primary"):
+                    with st.spinner("Eliminando datos de Google Sheets y recalculando..."):
                         try:
-                            # Ajuste de índice para la API (+1 porque la API toma la cabecera como 0)
-                            indices_api = [idx + 1 for idx in filas_a_eliminar]
+                            # +1 porque el índice de la API omite la fila 1 (cabeceras)
+                            indices_api = [opciones_eliminar[sel] + 1 for sel in seleccionados]
                             eliminar_filas_sheets(sheets_service, indices_api)
                             st.success("✅ Registros eliminados exitosamente. Actualizando Dashboard...")
                             st.rerun()
