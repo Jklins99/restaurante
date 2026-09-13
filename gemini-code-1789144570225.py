@@ -238,7 +238,15 @@ def parse_sunat_xml(file_obj):
         
         # Detectar tipo de documento (Boleta o Factura)
         serie_val = serie_numero.text if serie_numero is not None else 'N/A'
-        tipo_doc = "Boleta" if serie_val.startswith('B') else "Factura"
+        
+        # Detección más robusta
+        tipo_doc = "Factura"  # Por defecto
+        if serie_val != 'N/A':
+            serie_limpia = serie_val.strip().upper()
+            if serie_limpia.startswith('B'):
+                tipo_doc = "Boleta"
+            elif serie_limpia.startswith('F') or serie_limpia.startswith('E'):
+                tipo_doc = "Factura"
         
         # Determinar tasa de IGV según tipo de documento
         tasa_igv = 10.5 if tipo_doc == "Boleta" else 18.0
@@ -288,8 +296,23 @@ def procesar_factura_pdf(file_obj):
         total = float(total_match.group(1).replace(',', '')) if total_match else 0.0
         serie_val = serie_match.group(0) if serie_match else "N/A"
         
-        # Detectar tipo de documento (Boleta o Factura)
-        tipo_doc = "Boleta" if serie_val.startswith('B') else "Factura"
+        # Detectar tipo de documento (Boleta o Factura) - Múltiples métodos
+        tipo_doc = "Factura"  # Por defecto
+        
+        # Método 1: Por la serie
+        if serie_val != "N/A":
+            serie_limpia = serie_val.strip().upper()
+            if serie_limpia.startswith('B'):
+                tipo_doc = "Boleta"
+            elif serie_limpia.startswith('F'):
+                tipo_doc = "Factura"
+        
+        # Método 2: Buscar palabra "BOLETA" en el texto si no se encontró por serie
+        if tipo_doc == "Factura":
+            if re.search(r'\bBOLETA\b', texto_completo, re.IGNORECASE):
+                tipo_doc = "Boleta"
+            elif re.search(r'\bFACTURA\b', texto_completo, re.IGNORECASE):
+                tipo_doc = "Factura"
         
         # Determinar tasa de IGV según tipo de documento
         tasa_igv = 10.5 if tipo_doc == "Boleta" else 18.0
@@ -669,13 +692,53 @@ if archivos_subidos:
         
         # Mostrar tabla con mes detectado y tipo de documento
         columnas_display = ['Archivo', 'Mes Facturación', 'Documento', 'Tasa %', 'Categoría', 'Comprobante', 'Total', 'IGV', 'Estado']
-        df_display = df_todos[[col for col in columnas_display if col in df_todos.columns]]
+        df_display = df_todos[[col for col in columnas_display if col in df_todos.columns]].copy()
         
+        # Agregar indicador visual de tipo de documento
         st.dataframe(
             df_display,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Documento": st.column_config.Column(width="small"),
+                "Tasa %": st.column_config.Column(width="small"),
+            }
         )
+        
+        # Mostrar resumen de detección
+        boletas = len(df_todos[df_todos['Documento'] == 'Boleta'])
+        facturas = len(df_todos[df_todos['Documento'] == 'Factura'])
+        
+        if boletas > 0 or facturas > 0:
+            col_b, col_f = st.columns(2)
+            with col_b:
+                st.info(f"🧾 **Boletas detectadas**: {boletas} (Tasa: 10.5%)")
+            with col_f:
+                st.info(f"📋 **Facturas detectadas**: {facturas} (Tasa: 18%)")
+        
+        # Opción para corregir detección manual
+        with st.expander("🔧 ¿Detección incorrecta? Corrige aquí"):
+            st.warning("Si algún documento fue detectado incorrectamente, puedes corregir su tipo:")
+            
+            # Encontrar documentos que podrían estar mal detectados
+            facturas_lista = df_todos[df_todos['Documento'] == 'Factura']
+            boletas_lista = df_todos[df_todos['Documento'] == 'Boleta']
+            
+            if len(facturas_lista) > 0:
+                st.write("**Facturas que podrían ser Boletas:**")
+                archivos_fact = facturas_lista['Archivo'].tolist()
+                seleccion_fact = st.multiselect(
+                    "Selecciona archivos a corregir como Boletas",
+                    archivos_fact,
+                    key="corregir_boletas"
+                )
+                
+                if seleccion_fact:
+                    for archivo in seleccion_fact:
+                        idx = df_todos[df_todos['Archivo'] == archivo].index
+                        df_todos.loc[idx, 'Documento'] = 'Boleta'
+                        df_todos.loc[idx, 'Tasa %'] = 10.5
+                    st.success("✅ Documentos corregidos como Boletas")
         
         # --- ADVERTENCIAS ---
         duplicados = df_todos[df_todos['Estado'] == '⚠️ Duplicado']
