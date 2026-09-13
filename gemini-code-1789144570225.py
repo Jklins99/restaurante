@@ -130,7 +130,7 @@ def descargar_historial_sheets(sheets_service):
                 
             df = pd.DataFrame(datos_normalizados, columns=cabeceras)
             
-            for col in ['Base Imponible', 'IGV', 'Total', 'Tasa %']:
+            for col in ['Base Imponible', 'IGV', 'Total']:
                 if col in df.columns:
                     df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -143,12 +143,19 @@ def descargar_historial_sheets(sheets_service):
 def guardar_lote_en_sheets(sheets_service, df_validos):
     valores = []
     for _, datos in df_validos.iterrows():
-        igv_val = datos.get('IGV') if 'IGV' in datos else datos.get('IGV (18%)', 0)
+        # Mantenemos las 11 columnas originales para no romper la estructura de tu hoja
         fila = [
-            str(datos.get('Fecha', '')), str(datos.get('Tipo', '')), str(datos.get('Comprobante', '')), 
-            str(datos.get('RUC', '')), str(datos.get('Razón Social', '')), float(datos.get('Base Imponible', 0.0)), 
-            float(igv_val), float(datos.get('Total', 0.0)), str(datos.get('Categoría', '')), 
-            str(datos.get('Documento', 'N/A')), str(datos.get('Tasa %', 0.0))
+            str(datos.get('Fecha', '')), 
+            str(datos.get('Tipo', '')), 
+            str(datos.get('Comprobante', '')), 
+            str(datos.get('RUC', '')), 
+            str(datos.get('Razón Social', '')), 
+            float(datos.get('Base Imponible', 0.0)), 
+            float(datos.get('IGV', 0.0)), 
+            float(datos.get('Total', 0.0)), 
+            str(datos.get('Categoría', '')), 
+            str(datos.get('Documento', 'N/A')), 
+            "N/A"  # Columna Tasa % vacía para no alterar la estructura
         ]
         valores.append(fila)
         
@@ -177,24 +184,31 @@ def parse_sunat_xml(file_obj):
         total = float(total_node.text) if total_node is not None else 0.0
         igv = float(igv_node.text) if igv_node is not None else 0.0
         ruc_val = ruc.text if ruc is not None else 'N/A'
-        
         serie_val = serie_numero.text if serie_numero is not None else 'N/A'
         
-        tipo_doc = "Factura"
-        if serie_val != 'N/A':
-            serie_limpia = serie_val.strip().upper()
-            if serie_limpia.startswith('B'):
+        # --- CLASIFICACIÓN EXACTA SUNAT (XML) ---
+        tipo_doc_node = root.find('.//cbc:InvoiceTypeCode', ns)
+        if tipo_doc_node is not None:
+            codigo = tipo_doc_node.text.strip()
+            if codigo == '01': tipo_doc = "Factura"
+            elif codigo == '03': tipo_doc = "Boleta"
+            elif codigo == '07': tipo_doc = "Nota de Crédito"
+            else: tipo_doc = "Otro"
+        else:
+            # Fallback seguro leyendo la serie (Soporta B001, EB01, F001, E001)
+            serie_upper = serie_val.upper()
+            if serie_upper.startswith('B') or serie_upper.startswith('EB'): 
                 tipo_doc = "Boleta"
+            else: 
+                tipo_doc = "Factura"
         
-        # Cálculo dinámico basado en los datos del XML
         base_calculada = total - igv
-        tasa_real = round((igv / base_calculada) * 100, 1) if base_calculada > 0 else 0.0
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
             "Archivo": file_obj.name, "Tipo": "XML", "Documento": tipo_doc, "Fecha": fecha.text if fecha is not None else 'N/A',
             "Comprobante": serie_val, "RUC": ruc_val, "Razón Social": razon_social.text if razon_social is not None else 'N/A',
-            "Base Imponible": round(base_calculada, 2), "IGV": round(igv, 2), "Tasa %": tasa_real, "Total": round(total, 2), 
+            "Base Imponible": round(base_calculada, 2), "IGV": round(igv, 2), "Total": round(total, 2), 
             "Categoría": categoria, "Estado": "OK"
         }
     except Exception:
@@ -209,11 +223,8 @@ def procesar_factura_pdf(file_obj):
                 texto = page.extract_text()
                 if texto: texto_completo += texto + "\n"
         
-        # Extracción segura de fecha (Sin fallback a la fecha actual para no arruinar la contabilidad)
-        fecha_documento = None
         fecha_str = None
         fecha_match = re.search(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b', texto_completo)
-        
         if fecha_match:
             try:
                 dia, mes, anio = fecha_match.groups()
@@ -223,7 +234,23 @@ def procesar_factura_pdf(file_obj):
                 pass
         
         ruc_match = re.search(r'\b(10|20)\d{9}\b', texto_completo)
-        serie_match = re.search(r'\b[F|E|B][A-Z0-9]{3}-\d{1,8}\b', texto_completo)
+        
+        # --- NUEVO REGEX: Soporta series que empiezan con F, B, E (ej. E001, EB01, F001, B001) ---
+        serie_match = re.search(r'\b([FBE][A-Z0-9]{3}-\d{1,8})\b', texto_completo, re.IGNORECASE)
+        serie_val = serie_match.group(1).upper() if serie_match else "N/A"
+        
+        # --- CLASIFICACIÓN EXACTA (PDF) ---
+        texto_upper = texto_completo.upper()
+        if "BOLETA DE VENTA" in texto_upper or "BOLETA ELECT" in texto_upper:
+            tipo_doc = "Boleta"
+        elif "FACTURA ELECT" in texto_upper or "FACTURA DE VENTA" in texto_upper:
+            tipo_doc = "Factura"
+        else:
+            # Fallback a la serie (EB01 o B001 = Boleta, E001 o F001 = Factura)
+            if serie_val.startswith('B') or serie_val.startswith('EB'):
+                tipo_doc = "Boleta"
+            else:
+                tipo_doc = "Factura"
         
         total_match = re.search(r'(?:TOTAL|Total|Importe Total).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo)
         igv_match = re.search(r'(?:IGV|I\.G\.V\.|Impuesto).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo, re.IGNORECASE)
@@ -231,25 +258,11 @@ def procesar_factura_pdf(file_obj):
         
         total = float(total_match.group(1).replace(',', '')) if total_match else 0.0
         igv = float(igv_match.group(1).replace(',', '')) if igv_match else 0.0
-        
-        if base_match:
-            base_imponible = float(base_match.group(1).replace(',', ''))
-        else:
-            base_imponible = total - igv
-            
-        tasa_real = round((igv / base_imponible) * 100, 1) if base_imponible > 0 else 0.0
-        
-        serie_val = serie_match.group(0) if serie_match else "N/A"
-        tipo_doc = "Factura"
-        if serie_val != "N/A":
-            serie_limpia = serie_val.strip().upper()
-            if serie_limpia.startswith('B'):
-                tipo_doc = "Boleta"
+        base_imponible = float(base_match.group(1).replace(',', '')) if base_match else (total - igv)
         
         ruc_val = ruc_match.group(0) if ruc_match else 'N/A'
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
-        # Validar si falta información crucial
         estado_doc = "OK"
         if total <= 0 or not igv_match or not fecha_str:
             estado_doc = "Revisar Manualmente"
@@ -258,7 +271,7 @@ def procesar_factura_pdf(file_obj):
             "Archivo": file_obj.name, "Tipo": "PDF", "Documento": tipo_doc, "Fecha": fecha_str if fecha_str else 'N/A',
             "Comprobante": serie_val, "RUC": ruc_val,
             "Razón Social": "Por verificar (PDF)", "Base Imponible": round(base_imponible, 2),
-            "IGV": round(igv, 2), "Tasa %": tasa_real, "Total": round(total, 2), "Categoría": categoria, 
+            "IGV": round(igv, 2), "Total": round(total, 2), "Categoría": categoria, 
             "Estado": estado_doc
         }
     except Exception:
@@ -353,17 +366,17 @@ if sheets_service:
             
             st.divider()
             
-            # Tablas de datos
+            # Tablas de datos sin la columna de Tasa
             st.markdown('<p class="subtitle">Detalle de Ventas</p>', unsafe_allow_html=True)
             if not ventas_mes.empty:
-                cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Tasa %', 'Comprobante', 'RUC', 'Total', igv_col] if col in ventas_mes.columns]
+                cols_ventas = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'RUC', 'Total', igv_col] if col in ventas_mes.columns]
                 st.dataframe(ventas_mes[cols_ventas].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
             else:
                 st.info("📭 No hay ventas registradas en este periodo")
 
             st.markdown('<p class="subtitle">Detalle de Compras</p>', unsafe_allow_html=True)
             if not compras_mes.empty:
-                cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Tasa %', 'Comprobante', 'RUC', 'Total', igv_col] if col in compras_mes.columns]
+                cols_compras = [col for col in ['Fecha', 'Tipo', 'Documento', 'Comprobante', 'RUC', 'Total', igv_col] if col in compras_mes.columns]
                 st.dataframe(compras_mes[cols_compras].sort_values('Fecha', ascending=False), use_container_width=True, hide_index=True)
             else:
                 st.info("📭 No hay compras registradas en este periodo")
@@ -429,9 +442,9 @@ if not df_todos.empty:
     with cols_lote[1]: st.metric("📦 IGV Compras Extraído", f"S/ {total_igv_compras_lote:,.2f}")
     with cols_lote[2]: st.metric("✅ Total Válidos", len(df_validos))
     
-    # Vista previa
+    # Vista previa sin Tasa %
     st.markdown('<p class="subtitle">Vista Previa del Lote</p>', unsafe_allow_html=True)
-    columnas_display = ['Archivo', 'Mes Facturación', 'Documento', 'Tasa %', 'Categoría', 'Comprobante', 'Total', 'IGV', 'Estado']
+    columnas_display = ['Archivo', 'Mes Facturación', 'Documento', 'Categoría', 'Comprobante', 'Total', 'IGV', 'Estado']
     df_display = df_todos[[col for col in columnas_display if col in df_todos.columns]].copy()
     st.dataframe(df_display, use_container_width=True, hide_index=True)
     
