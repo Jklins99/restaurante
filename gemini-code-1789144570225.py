@@ -198,14 +198,19 @@ def descargar_historial_sheets(sheets_service):
     return pd.DataFrame()
 
 def guardar_en_sheets(sheets_service, datos, categoria):
+    # Usar IGV si existe, sino IGV (18%)
+    igv_val = datos.get('IGV') if 'IGV' in datos else datos.get('IGV (18%)', 0)
+    tipo_doc = datos.get('Documento', 'N/A')
+    tasa_igv = datos.get('Tasa %', 18.0)
+    
     fila = [
         str(datos['Fecha']), str(datos['Tipo']), str(datos['Comprobante']), str(datos['RUC']), 
-        str(datos['Razón Social']), float(datos['Base Imponible']), float(datos['IGV (18%)']), 
-        float(datos['Total']), str(categoria)
+        str(datos['Razón Social']), float(datos['Base Imponible']), float(igv_val), 
+        float(datos['Total']), str(categoria), str(tipo_doc), str(tasa_igv)
     ]
     cuerpo = {'values': [fila]}
     sheets_service.spreadsheets().values().append(
-        spreadsheetId=SPREADSHEET_ID, range='A:I',
+        spreadsheetId=SPREADSHEET_ID, range='A:K',
         valueInputOption='USER_ENTERED', body=cuerpo
     ).execute()
 
@@ -228,13 +233,19 @@ def parse_sunat_xml(file_obj):
         igv = float(igv_node.text) if igv_node is not None else 0.0
         ruc_val = ruc.text if ruc is not None else 'N/A'
         
+        # Detectar tipo de documento (Boleta o Factura)
+        serie_val = serie_numero.text if serie_numero is not None else 'N/A'
+        tipo_doc = "Boleta" if serie_val.startswith('B') else "Factura"
+        
+        # Determinar tasa de IGV según tipo de documento
+        tasa_igv = 10.5 if tipo_doc == "Boleta" else 18.0
+        
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
-            "Archivo": file_obj.name, "Tipo": "XML", "Fecha": fecha.text if fecha is not None else 'N/A',
-            "Comprobante": serie_numero.text if serie_numero is not None else 'N/A',
-            "RUC": ruc_val, "Razón Social": razon_social.text if razon_social is not None else 'N/A',
-            "Base Imponible": round(total - igv, 2), "IGV (18%)": round(igv, 2), "Total": round(total, 2), 
+            "Archivo": file_obj.name, "Tipo": "XML", "Documento": tipo_doc, "Fecha": fecha.text if fecha is not None else 'N/A',
+            "Comprobante": serie_val, "RUC": ruc_val, "Razón Social": razon_social.text if razon_social is not None else 'N/A',
+            "Base Imponible": round(total - igv, 2), "IGV": round(igv, 2), "Tasa %": tasa_igv, "Total": round(total, 2), 
             "Categoría": categoria, "Estado": "OK"
         }
     except Exception:
@@ -272,17 +283,26 @@ def procesar_factura_pdf(file_obj):
         total_match = re.search(r'(?:TOTAL|Total|Importe Total).*?(?:S/|S/\.)?\s*([\d,]+\.\d{2})', texto_completo)
         
         total = float(total_match.group(1).replace(',', '')) if total_match else 0.0
-        base_imponible = total / 1.18 if total > 0 else 0.0
+        serie_val = serie_match.group(0) if serie_match else "N/A"
+        
+        # Detectar tipo de documento (Boleta o Factura)
+        tipo_doc = "Boleta" if serie_val.startswith('B') else "Factura"
+        
+        # Determinar tasa de IGV según tipo de documento
+        tasa_igv = 10.5 if tipo_doc == "Boleta" else 18.0
+        
+        # Calcular base e IGV con la tasa correcta
+        base_imponible = total / (1 + tasa_igv/100) if total > 0 else 0.0
         igv = total - base_imponible if total > 0 else 0.0
         ruc_val = ruc_match.group(0) if ruc_match else 'N/A'
         
         categoria = "Venta" if ruc_val == RUC_RESTAURANTE else "Compra"
         
         return {
-            "Archivo": file_obj.name, "Tipo": "PDF", "Fecha": fecha_str,
-            "Comprobante": serie_match.group(0) if serie_match else "N/A", "RUC": ruc_val,
+            "Archivo": file_obj.name, "Tipo": "PDF", "Documento": tipo_doc, "Fecha": fecha_str,
+            "Comprobante": serie_val, "RUC": ruc_val,
             "Razón Social": "Por verificar (PDF)", "Base Imponible": round(base_imponible, 2),
-            "IGV (18%)": round(igv, 2), "Total": round(total, 2), "Categoría": categoria, 
+            "IGV": round(igv, 2), "Tasa %": tasa_igv, "Total": round(total, 2), "Categoría": categoria, 
             "Estado": "OK" if total > 0 else "Revisar Manualmente"
         }
     except Exception:
@@ -324,8 +344,10 @@ if sheets_service:
             ventas_mes = df_mes[df_mes['Categoría'] == 'Venta']
             compras_mes = df_mes[df_mes['Categoría'] == 'Compra']
             
-            igv_v = ventas_mes['IGV (18%)'].sum() if not ventas_mes.empty else 0.0
-            igv_c = compras_mes['IGV (18%)'].sum() if not compras_mes.empty else 0.0
+            # Usar columna IGV si existe, sino IGV (18%)
+            igv_col = 'IGV' if 'IGV' in df_mes.columns else 'IGV (18%)'
+            igv_v = ventas_mes[igv_col].sum() if not ventas_mes.empty else 0.0
+            igv_c = compras_mes[igv_col].sum() if not compras_mes.empty else 0.0
             total_v = ventas_mes['Total'].sum() if not ventas_mes.empty else 0.0
             total_c = compras_mes['Total'].sum() if not compras_mes.empty else 0.0
             
@@ -343,8 +365,9 @@ if sheets_service:
                 ventas_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Venta']
                 compras_ant = df_mes_anterior[df_mes_anterior['Categoría'] == 'Compra']
                 
-                igv_v_ant = ventas_ant['IGV (18%)'].sum() if not ventas_ant.empty else 0.0
-                igv_c_ant = compras_ant['IGV (18%)'].sum() if not compras_ant.empty else 0.0
+                igv_col_ant = 'IGV' if 'IGV' in df_mes_anterior.columns else 'IGV (18%)'
+                igv_v_ant = ventas_ant[igv_col_ant].sum() if not ventas_ant.empty else 0.0
+                igv_c_ant = compras_ant[igv_col_ant].sum() if not compras_ant.empty else 0.0
                 diferencia_anterior = igv_v_ant - igv_c_ant
                 saldo_anterior = abs(min(0.0, diferencia_anterior))
             
@@ -471,11 +494,34 @@ if sheets_service:
             
             st.divider()
             
+            # --- EXPLICACIÓN DEL CÁLCULO ---
+            if saldo_anterior > 0:
+                st.info(f"""
+                    📌 **Cómo se calcula tu obligación tributaria:**
+                    
+                    1. **IGV Neto del mes**: S/ {diferencia_igv:+,.2f} (Ventas - Compras)
+                    2. **Menos Saldo a tu favor de {mes_anterior_str}**: S/ {saldo_anterior:,.2f}
+                    3. **Resultado**: {'✅ Saldo a tu favor de S/ ' + f'{saldo_a_favor:,.2f}' if saldo_a_favor > 0 else '🏛️ Por pagar a SUNAT S/ ' + f'{igv_neto_pagar:,.2f}'}
+                    
+                    El crédito fiscal del mes anterior se compensa automáticamente en este período.
+                """)
+            
+            st.divider()
+            
             # --- TABLAS DE DATOS ---
             st.markdown('<p class="subtitle">Detalle de Ventas</p>', unsafe_allow_html=True)
             if not ventas_mes.empty:
+                cols_ventas = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Total', igv_col]
+                cols_ventas = [col for col in cols_ventas if col in ventas_mes.columns]
+                
+                # Agregar columna Documento y Tasa si existen
+                if 'Documento' in ventas_mes.columns:
+                    cols_ventas.insert(2, 'Documento')
+                if 'Tasa %' in ventas_mes.columns:
+                    cols_ventas.insert(3, 'Tasa %')
+                
                 st.dataframe(
-                    ventas_mes[['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Total', 'IGV (18%)']].sort_values('Fecha', ascending=False),
+                    ventas_mes[cols_ventas].sort_values('Fecha', ascending=False),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -484,8 +530,17 @@ if sheets_service:
 
             st.markdown('<p class="subtitle">Detalle de Compras</p>', unsafe_allow_html=True)
             if not compras_mes.empty:
+                cols_compras = ['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Total', igv_col]
+                cols_compras = [col for col in cols_compras if col in compras_mes.columns]
+                
+                # Agregar columna Documento y Tasa si existen
+                if 'Documento' in compras_mes.columns:
+                    cols_compras.insert(2, 'Documento')
+                if 'Tasa %' in compras_mes.columns:
+                    cols_compras.insert(3, 'Tasa %')
+                
                 st.dataframe(
-                    compras_mes[['Fecha', 'Tipo', 'Comprobante', 'RUC', 'Total', 'IGV (18%)']].sort_values('Fecha', ascending=False),
+                    compras_mes[cols_compras].sort_values('Fecha', ascending=False),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -546,8 +601,10 @@ if archivos_subidos:
         
         df_validos = df_todos[df_todos['Estado'] == 'OK']
         
-        total_igv_ventas_lote = df_validos[df_validos['Categoría'] == 'Venta']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
-        total_igv_compras_lote = df_validos[df_validos['Categoría'] == 'Compra']['IGV (18%)'].sum() if 'IGV (18%)' in df_validos.columns else 0.0
+        # Usar columna IGV si existe, sino IGV (18%)
+        igv_col_lote = 'IGV' if 'IGV' in df_validos.columns else 'IGV (18%)'
+        total_igv_ventas_lote = df_validos[df_validos['Categoría'] == 'Venta'][igv_col_lote].sum() if igv_col_lote in df_validos.columns else 0.0
+        total_igv_compras_lote = df_validos[df_validos['Categoría'] == 'Compra'][igv_col_lote].sum() if igv_col_lote in df_validos.columns else 0.0
         igv_neto_lote = max(0, total_igv_ventas_lote - total_igv_compras_lote)
         
         # --- RESUMEN DEL LOTE ---
@@ -584,9 +641,12 @@ if archivos_subidos:
         # --- PREVIEW DE DATOS ---
         st.markdown('<p class="subtitle">Vista Previa del Lote</p>', unsafe_allow_html=True)
         
-        # Mostrar tabla con mes detectado
+        # Mostrar tabla con mes detectado y tipo de documento
+        columnas_display = ['Archivo', 'Mes Facturación', 'Documento', 'Tasa %', 'Categoría', 'Comprobante', 'Total', 'IGV', 'Estado']
+        df_display = df_todos[[col for col in columnas_display if col in df_todos.columns]]
+        
         st.dataframe(
-            df_todos[['Archivo', 'Mes Facturación', 'Tipo', 'Categoría', 'RUC', 'Comprobante', 'Total', 'IGV (18%)', 'Estado']],
+            df_display,
             use_container_width=True,
             hide_index=True
         )
@@ -630,7 +690,8 @@ if archivos_subidos:
                 with col1:
                     st.metric(f"Documentos ({mes})", len(df_mes_validos))
                 with col2:
-                    igv_mes = df_mes_validos['IGV (18%)'].sum() if 'IGV (18%)' in df_mes_validos.columns else 0.0
+                    igv_col_mes = 'IGV' if 'IGV' in df_mes_validos.columns else 'IGV (18%)'
+                    igv_mes = df_mes_validos[igv_col_mes].sum() if igv_col_mes in df_mes_validos.columns else 0.0
                     st.metric(f"IGV Neto ({mes})", f"S/ {igv_mes:,.2f}")
                 with col3:
                     total_mes = df_mes_validos['Total'].sum() if 'Total' in df_mes_validos.columns else 0.0
